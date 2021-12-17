@@ -4,14 +4,25 @@ import openmm
 from openmm import unit
 from openmmtools import testsystems, integrators
 
+import math
+from random import random, randint
+
 water_box = testsystems.WaterBox(box_edge=2.0*unit.nanometer)
+
 system = water_box.system  # An OpenMM System object.
 positions = water_box.positions 
 
-mymolsys = testsystems.LysozymeImplicit()
+print (water_box.positions.shape)
 
-#mymolsys = testsystems.AlanineDipeptideVacuum()
+#mymolsys = testsystems.LysozymeImplicit()
+
+mymolsys = testsystems.AlanineDipeptideVacuum()
+#mymolsys = testsystems.HarmonicOscillator()
+#mymolsys = testsystems.AlanineDipeptideExplicit()
+#mymolsys = testsystems.AlanineDipeptideImplicit()
 molsystem = mymolsys.system
+
+print (water_box.mdtraj_topology)
 
 """
 pxylene_dsl = '(resname TMP) and (mass > 1.5)'  # Select heavy atoms of p-xylene.
@@ -31,8 +42,14 @@ context.setPositions(mymolsys.positions)
 
 print ('name of system: ', mymolsys.name)
 print ('topology of system: ', mymolsys.topology)
+print ('mdtraj_topology of system: ', mymolsys.mdtraj_topology)
+print ('positions of system: ', mymolsys.positions[0])
 
-n_steps = 1
-integrator.step(n_steps)
+n_steps = 2
+#integrator.step(n_steps)
+print (integrator.getComputationStep(1))
+#integrator.pretty_print()
+print ('positions of system: ', mymolsys.positions[0])
 
 #print (ADVacuum.positions)
+
