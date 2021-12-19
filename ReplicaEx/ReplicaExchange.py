@@ -6,6 +6,7 @@ from openmmtools import testsystems, integrators
 from openmmtools import mcmc
 from openmmtools import states
 from openmmtools import cache
+from openmmtools.multistate import ParallelTemperingSampler
 
 import math
 from random import random, randint
@@ -59,8 +60,10 @@ class ReplicaExchange:
 
 n_steps = 20
 
-mymolsys = testsystems.AlanineDipeptideVacuum()
+test_system = testsystems.AlanineDipeptideVacuum()
 protocol = {'temperature': [300, 310, 330, 370, 450] * unit.kelvin}
+
+"""
 thermo_states = states.create_thermodynamic_state_protocol(mymolsys.system, protocol)
 
 # Initialize replica initial configurations.
@@ -73,7 +76,27 @@ langevin_move = mcmc.LangevinSplittingDynamicsMove(timestep=2.0*unit.femtosecond
 parallel_tempering = ReplicaExchange(thermo_states, sampler_states, langevin_move)
 
 print ('before:', parallel_tempering._replicas_sampler_states[0].positions)
+"""
 
-parallel_tempering.run(n_steps)
+#parallel_tempering.run(n_steps)
 
-print ('before:', parallel_tempering._replicas_sampler_states[0].positions)
+#print ('before:', parallel_tempering._replicas_sampler_states[0].positions)
+
+n_replicas = 3  # Number of temperature replicas.
+T_min = 298.0 * unit.kelvin  # Minimum temperature.
+T_max = 600.0 * unit.kelvin  # Maximum temperature.
+
+reference_state = states.ThermodynamicState(system=test_system.system, temperature=T_min)
+
+move = mcmc.GHMCMove(timestep=2.0*unit.femtoseconds, n_steps=50)
+
+simulation = ParallelTemperingSampler(mcmc_moves=move, number_of_iterations=2)
+
+storage_path = tempfile.NamedTemporaryFile(delete=False).name + '.nc'
+
+reporter = MultiStateReporter(storage_path, checkpoint_interval=10)
+
+simulation.create(reference_state, states.SamplerState(test_system.positions), reporter, min_temperature=T_min, max_temperature=T_max, n_temperatures=n_replicas)
+
+simulation.run(n_iterations=1)
+
