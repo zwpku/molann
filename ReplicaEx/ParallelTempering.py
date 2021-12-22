@@ -36,9 +36,9 @@ test_system = MyAlanineDipeptideVacuum('./AlanineDipeptideOpenMM')
 
 topology = test_system.mdtraj_topology
 
-n_steps = 400
+n_steps = 2000
 n_replicas = 2  # Number of temperature replicas.
-T_min = 298.0 * unit.kelvin  # Minimum temperature.
+T_min = 398.0 * unit.kelvin  # Minimum temperature.
 T_max = 500.0 * unit.kelvin  # Maximum temperature.
 
 reference_state = states.ThermodynamicState(system=test_system.system, temperature=T_min)
