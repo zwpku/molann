@@ -25,7 +25,7 @@ import nglview as nv
 # +
 is_deactivate_warning = True
 is_savefigs = True
-is_makemovie = True
+is_makemovie = False
 is_makemovie_from_disk = False
 
 sysname = 'AlanineDipeptide'
@@ -99,7 +99,6 @@ if is_savefigs :
 
 # ### Make a movie out of trajectory data (experimental)
 
-# +
 if is_makemovie :
     n_frame = 10
     download_dir = '~/Downloads'
@@ -128,7 +127,6 @@ if is_makemovie :
     #print (im.get_frame(3).shape)
     im.write_gif('my_movie.gif', fps=frame_per_second)
 
-display.HTML("<img src='my_movie.gif'></img>")
-# -
+    display.HTML("<img src='my_movie.gif'></img>")
 
 
