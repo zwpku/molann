@@ -32,7 +32,7 @@ sysname = 'AlanineDipeptide'
 # name of PDB file
 pdb_filename = "./AlanineDipeptideOpenMM/vacuum.pdb"
 # name of DCD file
-traj_dcd_filename = 'traj.dcd'
+traj_dcd_filename = './output/traj.dcd'
 
 if is_deactivate_warning :
     import warnings
@@ -43,10 +43,9 @@ if is_makemovie :
     from time import sleep
     # display the gif in this notebook
     from IPython import display
-    
 # -
 
-# ### Load and display trajectory data 
+# ### Load trajectory data 
 
 # +
 # load the trajectory data from DCD file
@@ -74,7 +73,7 @@ r = dihedrals.Ramachandran(u.select_atoms('resid 2')).run()
 r.plot(ax, color='black', marker='.') #, ref=True)
 
 if is_savefigs :
-    fig_filename_Ramachandran = '%s_Ramachandran.eps' % sysname
+    fig_filename_Ramachandran = './output/%s_Ramachandran.eps' % sysname
     plt.savefig(fig_filename_Ramachandran)
     print ('Ramachandran plot saved to file: %s' % fig_filename_Ramachandran)
 
@@ -92,7 +91,7 @@ plt.xlabel("time (fs)")
 plt.ylabel(r"RMSD ($\AA$)")
 
 if is_savefigs :
-    fig_filename_rmsd = '%s_rmsd.eps' % sysname 
+    fig_filename_rmsd = './output/%s_rmsd.eps' % sysname 
     plt.savefig(fig_filename_rmsd)    
     print ('RMSD plot saved to file: %s' % fig_filename_rmsd)
 # -
@@ -102,7 +101,7 @@ if is_savefigs :
 if is_makemovie :
     n_frame = 10
     download_dir = '~/Downloads'
-    if is_makemovie_from_disk :
+    if is_makemovie_from_disk == False :
         # to save time for this tutorial, we make a movie with only a few frames
         # this for loop will generate many png pictures.
         for frame in range(0, n_frame):
@@ -125,7 +124,7 @@ if is_makemovie :
     #image_file = '%s/tmp0.png' % download_dir
     #im = mpy.ImageClip(image_file, duration=3)
     #print (im.get_frame(3).shape)
-    im.write_gif('my_movie.gif', fps=frame_per_second)
+    im.write_gif('./output/my_movie.gif', fps=frame_per_second)
 
     display.HTML("<img src='my_movie.gif'></img>")
 
