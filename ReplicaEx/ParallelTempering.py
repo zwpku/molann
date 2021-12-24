@@ -44,15 +44,12 @@ n_ckpt_interval = 10
 n_replicas = 1  # Number of temperature replicas.
 T_min = 298.0 * unit.kelvin  # Minimum temperature.
 T_max = 500.0 * unit.kelvin  # Maximum temperature.
-is_read_from_storage = True
+is_restart_from_storage = True
  
-suffix_string = "1"
+suffix_string = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+suffix_string = '1'
 storage_path = 'tmpfile_%s.nc' % suffix_string
-if is_read_from_storage == False:
-    if os.path.exists(storage_path):
-        os.remove(storage_path)
-        warnings.warn("storage file already exists: %s, and is deleted." % storage_path)
-  
+
 # This PDB file describes AlanineDipeptide in vacuum. 
 # It is from the OpenMM source code.
 pdb_filename = './AlanineDipeptideOpenMM/vacuum.pdb'
@@ -66,13 +63,15 @@ topology = test_system.mdtraj_topology # Topology in the format of mdtraj packag
 # ### Generate trajectory using parallel tempering sampler
 
 # +
-if is_read_from_storage :
+if is_restart_from_storage :
     simulation = ParallelTemperingSampler.from_storage(storage_path)
     print ('restart from checkpoint: %s' % storage_path)
     print ('current iteration=%d' % simulation.iteration)
 else :
+    print ('filename of checkpoint: %s' % storage_path)      
+    if os.path.exists(storage_path):
+        raise FileExistsError('checkpoint already exists!')    
     # The following steps are standard.
-    print ('filename of checkpoints: %s' % storage_path)      
     reference_state = states.ThermodynamicState(system=test_system.system, temperature=T_min)
     move = mcmc.GHMCMove(timestep=2.0*unit.femtoseconds, n_steps=n_ghmc_step)
     simulation = ParallelTemperingSampler(mcmc_moves=move, number_of_iterations=n_steps, online_analysis_interval=None)
