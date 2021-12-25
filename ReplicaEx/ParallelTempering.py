@@ -27,14 +27,11 @@ from openmmtools.multistate import ParallelTemperingSampler
 from openmmtools.multistate import MultiStateReporter
 
 import math
-from random import random, randint
-import tempfile
 import numpy as np
 import time
 import datetime
 import mdtraj
 import os
-import warnings
 
 
 # -
@@ -60,10 +57,13 @@ n_replicas = 1  # Number of temperature replicas.
 T_min = 298.0 * unit.kelvin  # Minimum temperature.
 T_max = 500.0 * unit.kelvin  # Maximum temperature.
 is_restart_from_storage = False
- 
+
+output_path = './output'
+traj_dcd_filename = '%s/traj.dcd' % output_path
+
 suffix_string = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 suffix_string = '1'
-storage_path = './output/tmpfile_%s.nc' % suffix_string
+storage_path = '%s/tmpfile_%s.nc' % (output_path, suffix_string)
 
 # This PDB file describes AlanineDipeptide in vacuum. 
 # It is from the OpenMM source code.
@@ -124,8 +124,7 @@ reporter.close()
 # construct a Trajectory object 
 traj = mdtraj.Trajectory(x, topology)
 # save the trajectory in dcd format 
-traj_filename = "./output/traj.dcd"
-traj.save_dcd(traj_filename)
+traj.save_dcd(traj_dcd_filename)
 end = time.time()
 
 print ( 'trajectory (of length %d) saved to file: %s.\n%d sec. elapsed.' \

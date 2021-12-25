@@ -18,6 +18,7 @@ from MDAnalysis.analysis import dihedrals, rms
 import matplotlib.pyplot as plt
 import numpy as np
 import nglview as nv
+import pandas
 
 
 # ### Set parameters 
@@ -32,7 +33,11 @@ sysname = 'AlanineDipeptide'
 # name of PDB file
 pdb_filename = "./AlanineDipeptideOpenMM/vacuum.pdb"
 # name of DCD file
-traj_dcd_filename = './output/traj.dcd'
+output_path = './Langevin_output'
+traj_dcd_filename = '%s/traj.dcd' % output_path
+
+csv_filename = "%s/state_data.csv" % output_path
+csv_col_idx = 1
 
 if is_deactivate_warning :
     import warnings
@@ -73,7 +78,7 @@ r = dihedrals.Ramachandran(u.select_atoms('resid 2')).run()
 r.plot(ax, color='black', marker='.') #, ref=True)
 
 if is_savefigs :
-    fig_filename_Ramachandran = './output/%s_Ramachandran.eps' % sysname
+    fig_filename_Ramachandran = './%s/%s_Ramachandran.eps' % (output_path, sysname)
     plt.savefig(fig_filename_Ramachandran)
     print ('Ramachandran plot saved to file: %s' % fig_filename_Ramachandran)
 
@@ -91,9 +96,22 @@ plt.xlabel("time (fs)")
 plt.ylabel(r"RMSD ($\AA$)")
 
 if is_savefigs :
-    fig_filename_rmsd = './output/%s_rmsd.eps' % sysname 
+    fig_filename_rmsd = './%s/%s_rmsd.eps' % (output_path, sysname) 
     plt.savefig(fig_filename_rmsd)    
     print ('RMSD plot saved to file: %s' % fig_filename_rmsd)
+# -
+
+# ### Plot state data from CSV file
+
+# +
+df1 = pandas.read_csv(csv_filename)
+print (df1.columns)
+df1.plot(kind='line', x='#"Time (ps)"', y=df1.columns[csv_col_idx])
+
+if is_savefigs :
+    fig_filename= './%s/%s_csv%d.eps' % (output_path, sysname, csv_col_idx) 
+    plt.savefig(fig_filename)    
+    print ('Potential Energy saved to file: %s' % fig_filename)
 # -
 
 # ### Make a movie out of trajectory data (experimental)
@@ -124,7 +142,7 @@ if is_makemovie :
     #image_file = '%s/tmp0.png' % download_dir
     #im = mpy.ImageClip(image_file, duration=3)
     #print (im.get_frame(3).shape)
-    im.write_gif('./output/my_movie.gif', fps=frame_per_second)
+    im.write_gif('./%s/my_movie.gif' % output_path, fps=frame_per_second)
 
     display.HTML("<img src='my_movie.gif'></img>")
 
