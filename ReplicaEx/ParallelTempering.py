@@ -128,6 +128,6 @@ traj.save_dcd(traj_dcd_filename)
 end = time.time()
 
 print ( 'trajectory (of length %d) saved to file: %s.\n%d sec. elapsed.' \
-       % (traj.n_frames, traj_filename, end - start) )
+       % (traj.n_frames, traj_dcd_filename, end - start) )
 # -
 
