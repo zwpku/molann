@@ -97,7 +97,7 @@ else :
     simulation.create(reference_state, states.SamplerState(test_system.positions), reporter, \
                       min_temperature=T_min, max_temperature=T_max, n_temperatures=n_replicas)
 
-print ('Simulation starts...')
+print ('Simulation starts...', flush=True)
 start = time.time()
 simulation.extend(n_steps)
 print ('final iteration=%d' % simulation.iteration)
