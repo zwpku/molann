@@ -32,6 +32,7 @@ import time
 import datetime
 import mdtraj
 import os
+import configparser
 
 
 # -
@@ -50,24 +51,24 @@ def MyAlanineDipeptideVacuum(pdb_filename):
 # ### Set parameters and define the MD system
 
 # +
-n_steps = 1000 # Total simulation steps, i.e. number of states.
-n_mcmc_step = 10
-n_ckpt_interval = 10
-n_replicas = 1  # Number of temperature replicas.
-T_min = 298.0 * unit.kelvin  # Minimum temperature.
-T_max = 500.0 * unit.kelvin  # Maximum temperature.
-is_restart_from_storage = False
+config = configparser.ConfigParser()
+config.read('params.cfg')
+pdb_filename = config['Default']['pdb_filename']
+n_steps = config['Default'].getint('n_steps') # Total simulation steps
+traj_dcd_filename = config['Default']['traj_dcd_filename']
 
-output_path = './output'
-traj_dcd_filename = '%s/traj.dcd' % output_path
+n_mcmc_step = config['Default'].getint('n_mcmc_step')
+n_ckpt_interval = config['Default'].getint('n_ckpt_interval')
+n_replicas = config['Default'].getint('n_replicas')  # Number of temperature replicas.
+T_min = config['Default'].getfloat('T_min') * unit.kelvin  # Minimum temperature.
+T_max = config['Default'].getfloat('T_max') * unit.kelvin  # Maximum temperature.
+is_restart_from_storage = config['Default'].getboolean('is_restart_from_storage')
 
+# +
 suffix_string = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 suffix_string = '1'
-storage_path = '%s/tmpfile_%s.nc' % (output_path, suffix_string)
+storage_path = 'tmpfile_%s.nc' % (suffix_string)
 
-# This PDB file describes AlanineDipeptide in vacuum. 
-# It is from the OpenMM source code.
-pdb_filename = './AlanineDipeptideOpenMM/vacuum.pdb'
 test_system = MyAlanineDipeptideVacuum(pdb_filename)
 # Alanatively, one can also use the testsystem provided by openmmtools package.
 #test_system = testsystems.AlanineDipeptideVacuum()

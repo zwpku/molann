@@ -23,32 +23,33 @@ import numpy as np
 import time
 import datetime
 import mdtraj
-import os
+import os, sys
 import warnings
 from sys import stdout
 import matplotlib.pyplot as plt
+import configparser
 
 # import openmm
 from openmm import *
 from openmm.app import *
 # -
 
+# ### set parameters
+
+config = configparser.ConfigParser()
+config.read('params.cfg')
+pdb_filename = config['Default']['pdb_filename']
+n_steps = config['Default'].getint('n_steps')
+Temp = config['Default'].getfloat('Temperature') * unit.kelvin
+traj_dcd_filename = config['Default']['traj_dcd_filename']
+csv_filename = config['Default']['csv_filename']
+report_interval_dcd = config['Default'].getint('report_interval_dcd')
+report_interval_stdout = config['Default'].getint('report_interval_stdout')
+report_interval_csv = config['Default'].getint('report_interval_csv')
+
 # ### MD simulation
 
 # +
-# This PDB file describes AlanineDipeptide in vacuum. 
-# It is from the OpenMM source code.
-pdb_filename = './AlanineDipeptideOpenMM/vacuum.pdb'
-
-n_steps = 20000 # Total simulation steps, i.e. number of states.
-Temp = 498.0 * unit.kelvin  # temperature.
-output_path = './Langevin_output'
-traj_dcd_filename = '%s/traj.dcd' % output_path
-csv_filename = '%s/state_data.csv' % output_path
-report_interval_dcd = 100
-report_interval_stdout = 1000
-report_interval_csv = 100
-
 print ( 'trajectory will be saved to file: %s' % traj_dcd_filename )
 
 # prepare before simulation
@@ -76,3 +77,6 @@ end = time.time()
 print ( 'Simulation ends, %d sec. elapsed.' % (end - start) )
 
 del simulation
+# -
+
+
