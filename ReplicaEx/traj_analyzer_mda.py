@@ -33,11 +33,11 @@ sysname = 'AlanineDipeptide'
 # name of PDB file
 pdb_filename = "./AlanineDipeptideOpenMM/vacuum.pdb"
 # name of DCD file
-output_path = './Langevin_output'
+output_path = './allegro-data/working_dir/PT_dir/' #Langevin_working_dir'
 traj_dcd_filename = '%s/traj.dcd' % output_path
 
 csv_filename = "%s/state_data.csv" % output_path
-csv_col_idx = 1
+csv_col_idx = 2
 
 if is_deactivate_warning :
     import warnings
