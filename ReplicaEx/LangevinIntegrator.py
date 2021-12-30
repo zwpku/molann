@@ -32,6 +32,7 @@ import configparser
 # import openmm
 from openmm import *
 from openmm.app import *
+from openmmplumed import PlumedForce
 # -
 
 # ### set parameters
@@ -46,6 +47,8 @@ csv_filename = config['Default']['csv_filename']
 report_interval_dcd = config['Default'].getint('report_interval_dcd')
 report_interval_stdout = config['Default'].getint('report_interval_stdout')
 report_interval_csv = config['Default'].getint('report_interval_csv')
+use_plumed_script = config['Default'].getboolean('use_plumed_script')
+plumed_script = config['Default'].get('plumed_script')
 
 # ### MD simulation
 
@@ -55,7 +58,13 @@ print ( 'trajectory will be saved to file: %s' % traj_dcd_filename )
 # prepare before simulation
 pdb = PDBFile(pdb_filename)
 forcefield = ForceField('amber14-all.xml')
+
 system = forcefield.createSystem(pdb.topology, nonbondedCutoff=2*unit.nanometer, constraints=HBonds)
+
+if use_plumed_script :
+    print ('plumed script: %s' % plumed_script)
+    system.addForce(PlumedForce(plumed_script))
+
 integrator = LangevinIntegrator(Temp, 1/unit.picosecond, 2*unit.femtoseconds)
 simulation = Simulation(pdb.topology, system, integrator)
 simulation.context.setPositions(pdb.positions)
