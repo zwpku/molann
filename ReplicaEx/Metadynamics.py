@@ -60,8 +60,10 @@ forcefield = ForceField('amber14-all.xml')
 system = forcefield.createSystem(pdb.topology, nonbondedCutoff=2*unit.nanometer, constraints=HBonds)
 
 script = """
-d: DISTANCE ATOMS=1,10
-METAD ARG=d SIGMA=0.2 HEIGHT=0.3 PACE=500"""
+phi: TORSION ATOMS=5,7,9,15 
+psi: TORSION ATOMS=7,9,15,17 
+METAD ARG=phi,psi SIGMA=0.2,0.2 HEIGHT=0.3 PACE=500"""
+
 system.addForce(PlumedForce(script))
 
 integrator = LangevinIntegrator(Temp, 1/unit.picosecond, 2*unit.femtoseconds)
@@ -86,4 +88,5 @@ print ( 'Simulation ends, %d sec. elapsed.' % (end - start) )
 
 del simulation
 # -
+
 
