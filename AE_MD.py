@@ -9,20 +9,20 @@ import torch.nn as nn
 from sklearn.model_selection import train_test_split as ttsplit
 
 import MDAnalysis as mda
-from MDAnalysis.analysis import dihedrals, rms
+from MDAnalysis.analysis import dihedrals, rms, align
 import nglview as nv
-import pandas
+import pandas as pd
 # -
 
 # ## Part 1: load MD data
 
 # +
-sysname = 'AlanineDipeptide'
+sys_name = 'AlanineDipeptide'
 # name of PDB file
-pdb_filename = "./AlanineDipeptideOpenMM/vacuum.pdb"
+pdb_filename = "MD_samplers/AlanineDipeptideOpenMM/vacuum.pdb"
 # name of DCD file
-#output_path = './allegro-data/working_dir/Langevin_working_dir' 
-output_path = './allegro-data/working_dir/Langevin_working_dir-test3-plumed/' 
+output_path = 'MD_samplers/allegro-data/working_dir/Langevin_working_dir' 
+#output_path = './allegro-data/working_dir/Langevin_working_dir-test3-plumed/' 
 traj_dcd_filename = '%s/traj.dcd' % output_path
 
 # load the trajectory data from DCD file
@@ -30,22 +30,79 @@ u = mda.Universe(pdb_filename, traj_dcd_filename)
 # load the reference configuration from the PDB file
 ref = mda.Universe(pdb_filename) 
 
-# print some information
-print ('residues: ', u.residues)
-print ('trajectory: ', u.trajectory)
-print ('reference: ', ref.trajectory)
+atoms_info = pd.DataFrame(
+    np.array([ref.atoms.ids, ref.atoms.names, ref.atoms.types, ref.atoms.masses, ref.atoms.resids, ref.atoms.resnames]).T, 
+    columns=['id', 'name', 'type', 'mass', 'resid', 'resname']
+)
+
+# print information of trajectory
+print ('\nSummary:\n\
+\tno. of atoms: {}\n\
+\tno. of residues: {}\n'.format(u.trajectory.n_atoms, u.residues.n_residues)
+      )
+print ('Detailed atom information:\n', atoms_info)
+
+ 
+
+# +
+# load trajectory to numpy array
+traj = u.trajectory.timeseries(order='fac')
+# print information of trajectory
+print ('Trajectory Info:\n\
+\tno. of frames in trajectory data: {}\n\
+\ttimestep: {:.1f}ps\n\
+\ttime length: {:.1f}ps\n\
+\tshape of data array: {}'.format(u.trajectory.n_frames, 
+                                  u.trajectory.time, 
+                                  u.trajectory.totaltime,
+                                  traj.shape
+                                 )
+      )
 
 # display the trajectory
 view = nv.show_mdanalysis(u)
-print ('number of frames: %d ' % view.max_frame)
-view    
+view   
 # -
 
-# generate the Ramachandran plot of two dihedral angles
+# ### Optional: generate Ramachandran plot of two dihedral angles
+
 ax = plt.gca()
 r = dihedrals.Ramachandran(u.select_atoms('resid 2')).run()
 r.plot(ax, color='black', marker='.') #, ref=True)
 
+# ## Alignment
+
+# +
+head_frames = 10
+selector = "type C or type O or type N"
+rmsd_list = []
+for ts in u.trajectory[:head_frames]:
+    rmsd_ret = rms.rmsd(u.select_atoms(selector).positions, ref.select_atoms(selector).positions, superposition=False)
+    rmsd_list.append(rmsd_ret)
+print ('First {} RMSD values before alignment:\n\t'.format(head_frames), rmsd_list)
+
+selected_ids = u.select_atoms(selector).ids
+print ('\nAligning by atoms:')
+print (atoms_info.loc[atoms_info['id'].isin(selected_ids)])
+
+'''
+align.AlignTraj(u,  # trajectory to align
+                ref,  # reference
+                select=selector,  # selection of atoms to align
+                filename=None,  # file to write the trajectory to
+                in_memory=True,
+                match_atoms=True,  # whether to match atoms based on mass
+               ).run()
+'''
+rmsd_list_aligned = []
+for ts in u.trajectory[:head_frames]:
+    rmsd_ret = rms.rmsd(u.select_atoms(selector).positions, ref.select_atoms(selector).positions, superposition=False)
+    rmsd_list_aligned.append(rmsd_ret)
+    
+print ('\nFirst {} RMSD values after alignment:\n\t'.format(head_frames), rmsd_list_aligned)
+
+
+# -
 
 # ## Part 2: define neural network model and training function
 
