@@ -33,7 +33,8 @@ sysname = 'AlanineDipeptide'
 # name of PDB file
 pdb_filename = "./AlanineDipeptideOpenMM/vacuum.pdb"
 # name of DCD file
-output_path = './allegro-data/working_dir/PT_dir/' #Langevin_working_dir'
+#output_path = './allegro-data/working_dir/Langevin_working_dir' 
+output_path = './allegro-data/working_dir/Langevin_working_dir-test3-plumed/' 
 traj_dcd_filename = '%s/traj.dcd' % output_path
 
 csv_filename = "%s/state_data.csv" % output_path
