@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-# + 
 import numpy as np
 from scipy import integrate
 import matplotlib.pyplot as plt
@@ -8,9 +7,8 @@ import torch
 import math 
 import torch.nn as nn
 from sklearn.model_selection import train_test_split as ttsplit
-# - 
 
-### Part 1: define necessary functions and classes.
+# ## Part 1: define necessary functions and classes.
 
 # The follow cell defines all our potentials classes.
 
@@ -402,7 +400,7 @@ class DoubleWellPotAlongCircle :
     def nabla_V(self, x): 
         return np.column_stack( (4.0 * x[:,0] / self.eps * (x[:,0]**2 + x[:,1]**2 - 1), 4.0 * x[:,1] + 4.0 * x[:,1] / self.eps * (x[:,0]**2 + x[:,1]**2 - 1)) )
 
-# - 
+# -
 
 # We then define a function 'UnbiasedTraj' to generate an trajectory according an Euler--Maruyama discretization 
 # $$
@@ -414,7 +412,6 @@ class DoubleWellPotAlongCircle :
 # $$
 # This functions takes as argument a potential object, initial conditions, the number of simulation steps and a time step. It generates a realization of a trajectory (subsampled at some prescribed rate), and possibly records the value of the potential energy function at the points along the trajectory.
 
-# +
 def UnbiasedTraj(pot, X_0, delta_t=1e-3, T=1000, save=1, save_energy=False, seed=0):
     """Simulates an overdamped langevin trajectory with a Euler-Maruyama numerical scheme 
 
@@ -445,7 +442,6 @@ def UnbiasedTraj(pot, X_0, delta_t=1e-3, T=1000, save=1, save_energy=False, seed
                 Pot_values.append(pot.V(X)[0])
     return np.array(traj), np.array(Pot_values)
 
-# -
 
 # We now define the Auto encoders classes and useful functions for the training.
 
@@ -646,7 +642,7 @@ def train_with_variance_decomposition_plots(model,
 
 # -
 
-### Part 2: run a test.
+# ## Part 2: run a test.
 
 # All the parameters are set in the cell below. 
 
@@ -718,7 +714,7 @@ if save_fig_to_file :
     fig.savefig(filename)
     print ( "potential profiles saved to file: %s" % filename )
 
-# - 
+# -
 
 # Data set generation 
 
@@ -743,7 +739,7 @@ if save_fig_to_file :
     fig.savefig(traj_filename)
     print ("trajectory plot saved to file: %s" % traj_filename)
 
-# - 
+# -
 
 # Training the NN
 
@@ -853,4 +849,3 @@ if save_fig_to_file :
     fig_filename = 'result_%s.jpg' % pot_name
     plt.savefig(fig_filename)
     print ('conditional expectation plotted to file: %s' % fig_filename)
-# -
