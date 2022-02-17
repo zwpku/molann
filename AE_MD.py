@@ -50,32 +50,45 @@ print ('\nSummary:\n', atoms_info['type'].value_counts().rename_axis('type').res
 # #### 1.2 load trajectory, and align with respect to refenrence
 
 # +
-def align(traj, ref_pos, align_atom_indices):
-    
-        traj_selected_atoms = traj[:, align_atom_indices, :]
-        # translation
-        x_notran = traj_selected_atoms - ref_pos 
+# define a class for aligning trajectory
+class Align(object):
+    def __init__(self, ref_pos, align_atom_indices):
+        self.atom_indices = align_atom_indices
+        self.ref_x = torch.from_numpy(ref_pos[align_atom_indices]).double()        
+        # shift reference state 
+        ref_c = torch.mean(self.ref_x, 0) 
+        self.ref_x = self.ref_x - ref_c
+        self.num_atoms = len(align_atom_indices) * 3
         
-        xtmp = x_notran.permute((0,2,1)).reshape((-1, self.ref_num_atoms))
-        prod = torch.matmul(xtmp, self.ref_x).reshape((-1, 3, 3))
+    def dist_to_ref(self, traj):
+        return torch.linalg.norm(torch.sub(traj[:,self.atom_indices,:], self.ref_x), dim=(1,2)).numpy()     
+            
+    def __call__(self, traj):    
+        traj_selected_atoms = traj[:, self.atom_indices, :]
+        # centers
+        x_c = torch.mean(traj_selected_atoms, 1, True)
+        # translation
+        x_notran = traj_selected_atoms - x_c 
+        
+        xtmp = x_notran.permute((0,2,1))
+        prod = torch.matmul(xtmp, self.ref_x) # dimension: traj_length x 3 x 3
         u, s, vh = torch.linalg.svd(prod)
 
-        diag_mat = torch.diag(torch.ones(3)).double().unsqueeze(0).repeat(self.batch_size, 1, 1)
+        diag_mat = torch.diag(torch.ones(3)).double().unsqueeze(0).repeat(traj.size(0), 1, 1)
 
         sign_vec = torch.sign(torch.linalg.det(torch.matmul(u, vh))).detach()
         diag_mat[:,2,2] = sign_vec
 
         rotate_mat = torch.bmm(torch.bmm(u, diag_mat), vh)
 
-        return torch.matmul(x-ref_pos, rotate_mat).reshape((-1, self.tot_dim) )        
-
+        return torch.matmul(traj-x_c, rotate_mat)     
 
 # load the trajectory data from DCD file
 u = mda.Universe(pdb_filename, traj_dcd_filename)
 
 print ('\n[Task 1/2] load trajectory to numpy array...', end='')
-# load trajectory to numpy array
-trajectory = u.trajectory.timeseries(order='fac')
+# load trajectory to torch tensor 
+trajectory = torch.from_numpy(u.trajectory.timeseries(order='fac')).double()
 print ('done.')
 
 # print information of trajectory
@@ -90,13 +103,21 @@ print ('\nTrajectory Info:\n\
                                  )
       )
 
-head_frames = 5
 align_selector = "type C or type O or type N"
 selected_ids = u.select_atoms(align_selector).ids
+
+align_functor = Align(ref.atoms.positions, selected_ids-1)
+
 print ('\n[Task 2/2] aligning by atoms:')
 print (atoms_info.loc[atoms_info['id'].isin(selected_ids)][['id','name', 'type']])
 
-ref_pos = ref.atoms.positions
+head_frames = 5
+dist_list = align_functor.dist_to_ref(trajectory[:head_frames,:,:])
+trajectory = align_functor(trajectory)
+dist_list_aligned = align_functor.dist_to_ref(trajectory[:head_frames,:,:])
+
+"""
+#One could also use the alignment methods provided in MDAnalysis package 
 rmsd_list = []
 for idx in range(head_frames):
     rmsd_ret = rms.rmsd(trajectory[idx,selected_ids-1,:], ref_pos[selected_ids-1,:], superposition=False)
@@ -116,7 +137,10 @@ rmsd_list_aligned = []
 for ts in u.trajectory[:head_frames]:
     rmsd_ret = rms.rmsd(u.select_atoms(align_selector).positions, ref.select_atoms(align_selector).positions, superposition=False)
     rmsd_list_aligned.append(rmsd_ret)
-    
+"""
+
+print ('\n[Task 2/2] done.')
+
 
 # -
 
@@ -124,8 +148,8 @@ for ts in u.trajectory[:head_frames]:
 
 # +
 #print RMSD values before and after alignment
-print ('First {} RMSD values before alignment:\n\t'.format(head_frames), rmsd_list)
-print ('\nFirst {} RMSD values after alignment:\n\t'.format(head_frames), rmsd_list_aligned)
+print ('First {} distances before alignment:\n\t'.format(head_frames), dist_list)
+print ('\nFirst {} distances after alignment:\n\t'.format(head_frames), dist_list_aligned)
 
 #generate Ramachandran plot of two dihedral angles
 ax = plt.axes()
@@ -145,7 +169,6 @@ view
 
 # +
 #Auto encoders class and functions for training.
-
 def create_seqential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers = []
     for i in range(len(layer_dims)-2) :
@@ -155,13 +178,14 @@ def create_seqential_nn(layer_dims, activation=torch.nn.Tanh()):
     
     return torch.nn.Sequential(*layers)
        
-class Encoder(nn.Module):
-    def __init__(self, encoder_dims, atom_indices=None, activation=torch.nn.Tanh()):
+class Encoder(torch.nn.Module):
+    def __init__(self, align_func, encoder_dims, activation=torch.nn.Tanh(), atom_indices=None):
         """Initialise auto encoder
 
         :param encoder_dims: list, List of dimensions for encoder, including input/output layers
         """
         super(Encoder, self).__init__()
+        self.align_func = align_func
         self.atom_indices = atom_indices
         self.encoder = create_seqential_nn(encoder_dims, activation)
 
@@ -174,18 +198,16 @@ class Encoder(nn.Module):
         encoded = self.encoder(inp)
         return encoded
 
-def xi_ae(encoder, x):
-    """Collective variable defined through an auto encoder model
+    def xi(self, x, is_aligned=True):
+        """Collective variable defined through the encoder 
 
-    :param model: Neural network model build with PyTorch
-    :param x: np.array, position, ndim = 2, shape = (1,1)
+        :param x: np.array, position, ndim = 2, shape = (1,1)
 
-    :return: xi: np.array
-    """
-    model.eval()
-    if torch.is_tensor(x) == False :
-        x = torch.from_numpy(x).float()
-    return model.encoder(x).detach().numpy()
+        :return: xi: np.array
+        """
+        if torch.is_tensor(x) == False :
+            x = torch.from_numpy(x).float()
+        return self.encoder(x).detach().numpy()
 
 # Next, we define the training function 
 def train(model, optimizer, traj, weights, train_atom_indices, num_epochs=10, batch_size=32, test_ratio=0.2):
@@ -206,8 +228,6 @@ def train(model, optimizer, traj, weights, train_atom_indices, num_epochs=10, ba
     #--- prepare the data ---
     # split the dataset into a training set (and its associated weights) and a test set
     X_train, X_test, w_train, w_test = train_test_split(traj, weights, test_size=test_ratio)  
-    X_train = torch.tensor(X_train.astype('float32'))
-    X_test = torch.tensor(X_test.astype('float32'))
     # intialization of the methods to sample with replacement from the data points (needed since weights are present)
     train_sampler = torch.utils.data.WeightedRandomSampler(w_train, len(w_train))
     test_sampler  = torch.utils.data.WeightedRandomSampler(w_test, len(w_test))
@@ -297,13 +317,12 @@ d_layer_dims = [k, 20, 20, input_dim]
 print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, k))
 
 activation = torch.nn.Tanh()
-encoder = Encoder(e_layer_dims, train_atom_indices, activation)
+encoder = Encoder(align_functor, e_layer_dims, activation, train_atom_indices)
 decoder = create_seqential_nn(d_layer_dims, activation)
 
 ae_model = torch.nn.Sequential(encoder, decoder) 
 
 print ('Autoencoder:\n', ae_model)
-save_fig_to_file = False
 # -
 
 # #### start training 
@@ -334,6 +353,7 @@ loss_evol1 = np.array(loss_evol1)
 # Plot the results 
 
 # +
+save_fig_to_file = False
 start_epoch_index = 1
 fig, (ax0, ax1, ax2)  = plt.subplots(1,3, figsize=(12,4)) 
 ax0.plot(range(start_epoch_index, num_epochs), loss_evol1[start_epoch_index:, 0], '--', label='train loss', marker='o')
