@@ -11,6 +11,10 @@ import MDAnalysis as mda
 from MDAnalysis.analysis import dihedrals, rms, align
 import nglview as nv
 import pandas as pd
+from tqdm import tqdm
+from tensorboardX import SummaryWriter
+import os
+import time
 # -
 
 # ## Part 1: prepare MD data
@@ -63,7 +67,10 @@ class Align(object):
     def dist_to_ref(self, traj):
         return torch.linalg.norm(torch.sub(traj[:,self.atom_indices,:], self.ref_x), dim=(1,2)).numpy()     
             
-    def __call__(self, traj):    
+    def __call__(self, traj):  
+        """
+        align trajectory by translation and rotation
+        """
         traj_selected_atoms = traj[:, self.atom_indices, :]
         # centers
         x_c = torch.mean(traj_selected_atoms, 1, True)
@@ -141,16 +148,17 @@ for ts in u.trajectory[:head_frames]:
 
 print ('\n[Task 2/2] done.')
 
+#print RMSD values before and after alignment
+print ('\nfirst {} distances before alignment:\n\t'.format(head_frames), dist_list)
+print ('\nfirst {} distances after alignment:\n\t'.format(head_frames), dist_list_aligned)
+
+
 
 # -
 
 # #### (optional) display information
 
 # +
-#print RMSD values before and after alignment
-print ('First {} distances before alignment:\n\t'.format(head_frames), dist_list)
-print ('\nFirst {} distances after alignment:\n\t'.format(head_frames), dist_list_aligned)
-
 #generate Ramachandran plot of two dihedral angles
 ax = plt.axes()
 r = dihedrals.Ramachandran(u.select_atoms('resid 2')).run()
@@ -176,7 +184,7 @@ def create_seqential_nn(layer_dims, activation=torch.nn.Tanh()):
         layers.append(activation)
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
     
-    return torch.nn.Sequential(*layers)
+    return torch.nn.Sequential(*layers).double()
        
 class Encoder(torch.nn.Module):
     def __init__(self, align_func, encoder_dims, activation=torch.nn.Tanh(), atom_indices=None):
@@ -198,26 +206,27 @@ class Encoder(torch.nn.Module):
         encoded = self.encoder(inp)
         return encoded
 
-    def xi(self, x, is_aligned=True):
+    def xi(self, x, is_aligned=False):
         """Collective variable defined through the encoder 
-
-        :param x: np.array, position, ndim = 2, shape = (1,1)
-
+        
         :return: xi: np.array
         """
-        if torch.is_tensor(x) == False :
-            x = torch.from_numpy(x).float()
-        return self.encoder(x).detach().numpy()
+        with torch.no_grad():
+            if torch.is_tensor(x) == False:
+                x = torch.from_numpy(x).double()
+            if is_aligned == False:
+                x = self.align_func(x)
+            return self.forward(x).detach().numpy()
 
 # Next, we define the training function 
-def train(model, optimizer, traj, weights, train_atom_indices, num_epochs=10, batch_size=32, test_ratio=0.2):
+def train(model, optimizer, writer, traj, weights, train_atom_indices, num_epochs=10, batch_size=32, test_ratio=0.2):
     """Function to train an AE model
     
     :param model: Neural network model built with PyTorch,
-    :param loss_function: Function built with PyTorch tensors or built-in PyTorch loss function
     :param optimizer: PyTorch optimizer object
-    :param traj: np.array, physical trajectory (in the potential pot), ndim == 2, shape == T // save + 1, pot.dim
-    :param weights: np.array, weights of each point of the trajectory when the dynamics is biased, ndim == 1, shape == T // save + 1, 1
+    :param writer: SummaryWriter for log
+    :param traj: torch tensor, trajectory data, shape = (traj. length, no. of atom, 3)
+    :param weights: np.array, weights of each point of the trajectory when the dynamics is biased, ndim == 1
     :param num_epochs: int, number of times the training goes through the whole dataset
     :param batch_size: int, number of data points per batch for estimation of the gradient
     :param test_size: float, between 0 and 1, giving the proportion of points used to compute test loss
@@ -245,7 +254,7 @@ def train(model, optimizer, traj, weights, train_atom_indices, num_epochs=10, ba
     # --- start the training over the required number of epochs ---
     loss_list = []
     print ("\ntraining starts, %d epochs in total." % num_epochs) 
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs)):
         # Train the model by going through the whole dataset
         model.train()
         train_loss = []
@@ -262,7 +271,6 @@ def train(model, optimizer, traj, weights, train_atom_indices, num_epochs=10, ba
             train_loss.append(loss)
             # Updating parameters
             optimizer.step()
-            print (epoch, iteration)
         # Evaluate the test loss on the test dataset
         model.eval()
         with torch.no_grad():
@@ -275,7 +283,10 @@ def train(model, optimizer, traj, weights, train_atom_indices, num_epochs=10, ba
                 # Store loss
                 test_loss.append(loss)
             loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
-
+            
+        writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
+        writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
+        
     print ("training ends.\n") 
     return model, loss_list
 # -
@@ -294,6 +305,12 @@ def set_seed_all(seed=-1):
 seed = None 
 if seed:
     set_seed_all(seed)
+
+model_save_dir = 'checkpoint'
+prefix = f"{sys_name}-" 
+model_path = os.path.join(model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+print ('\nLog directory: {}\n'.format(model_path))
+writer = SummaryWriter(model_path)
     
 #set training parameters
 batch_size = 10000
@@ -336,6 +353,7 @@ else:
 
 ae_model, loss_list = train(ae_model, 
                             optimizer, 
+                            writer,
                             trajectory, 
                             np.ones(trajectory.shape[0]), 
                             train_atom_indices,
@@ -355,13 +373,16 @@ loss_evol1 = np.array(loss_evol1)
 # +
 save_fig_to_file = False
 start_epoch_index = 1
-fig, (ax0, ax1, ax2)  = plt.subplots(1,3, figsize=(12,4)) 
-ax0.plot(range(start_epoch_index, num_epochs), loss_evol1[start_epoch_index:, 0], '--', label='train loss', marker='o')
-ax0.plot(range(1, num_epochs), loss_evol1[start_epoch_index:, 1], '-.', label='test loss', marker='+')
-ax0.legend()
-ax0.set_title('losses')
+ax  = plt.axes() 
+ax.plot(range(start_epoch_index, num_epochs), loss_evol1[start_epoch_index:, 0], '--', label='train loss', marker='o')
+ax.plot(range(1, num_epochs), loss_evol1[start_epoch_index:, 1], '-.', label='test loss', marker='+')
+ax.legend()
+ax.set_title('losses')
 
 if save_fig_to_file :
     fig_filename = 'training_loss_%s.jpg' % pot_name
     fig.savefig(fig_filename)
     print ('training loss plotted to file: %s' % fig_filename)
+# -
+
+
