@@ -75,6 +75,7 @@ class Align(object):
         """
         align trajectory by translation and rotation
         """
+                         
         traj_selected_atoms = traj[:, self.atom_indices, :]
         # centers
         x_c = torch.mean(traj_selected_atoms, 1, True)
@@ -92,8 +93,60 @@ class Align(object):
 
         rotate_mat = torch.bmm(torch.bmm(u, diag_mat), vh)
 
-        return torch.matmul(traj-x_c, rotate_mat)     
+        aligned_traj = torch.matmul(traj-x_c, rotate_mat) 
+                
+        return aligned_traj     
 
+class Preprocessing(torch.nn.Module):
+    
+    def __init__(self, ref_pos, align_atom_indices, nn_atom_indices):
+
+        super(Preprocessing, self).__init__()
+        
+        self.align_atom_indices = torch.tensor(align_atom_indices).long()
+        self.ref_x = torch.from_numpy(ref_pos[align_atom_indices]).double()        
+        # shift reference state 
+        ref_c = torch.mean(self.ref_x, 0) 
+        self.ref_x = self.ref_x - ref_c
+        self.nn_atom_indices = torch.tensor(nn_atom_indices).long()
+        
+    def show_info(self):
+        print ('atom indices used for alignment: ', self.align_atom_indices.numpy())
+        print ('atom indices used for input layer: ', self.nn_atom_indices.numpy())
+        print ('\n\treference state used in aligment:\n', self.ref_x.numpy())
+
+    def align(self, traj):  
+        """
+        align trajectory by translation and rotation
+        """
+                         
+        traj_selected_atoms = traj[:, self.align_atom_indices, :]
+        # centers
+        x_c = torch.mean(traj_selected_atoms, 1, True)
+        # translation
+        x_notran = traj_selected_atoms - x_c 
+        
+        xtmp = x_notran.permute((0,2,1))
+        prod = torch.matmul(xtmp, self.ref_x) # dimension: traj_length x 3 x 3
+        u, s, vh = torch.linalg.svd(prod)
+
+        diag_mat = torch.diag(torch.ones(3)).double().unsqueeze(0).repeat(traj.size(0), 1, 1)
+
+        sign_vec = torch.sign(torch.linalg.det(torch.matmul(u, vh))).detach()
+        diag_mat[:,2,2] = sign_vec
+
+        rotate_mat = torch.bmm(torch.bmm(u, diag_mat), vh)
+
+        aligned_traj = torch.matmul(traj-x_c, rotate_mat) 
+                
+        return aligned_traj     
+    
+   
+    def forward(self, inp):
+        inp = self.align(inp)
+        inp = torch.flatten(inp[:,self.nn_atom_indices,:], start_dim=1)
+        return inp
+    
 # load the trajectory data from DCD file
 u = mda.Universe(pdb_filename, traj_dcd_filename)
 
@@ -117,44 +170,24 @@ print ('\nTrajectory Info:\n\
 align_selector = "type C or type O or type N"
 selected_ids = u.select_atoms(align_selector).ids
 
-align_functor = Align(ref.atoms.positions, selected_ids-1)
-
-print ('\n[Task 2/2] aligning by atoms:')
+print ('\n[Task 2/2] Preprocessing.\naligning by atoms:')
 print (atoms_info.loc[atoms_info['id'].isin(selected_ids)][['id','name', 'type']])
 
-head_frames = 5
-dist_list = align_functor.dist_to_ref(trajectory[:head_frames,:,:])
-trajectory = align_functor(trajectory)
-dist_list_aligned = align_functor.dist_to_ref(trajectory[:head_frames,:,:])
+train_atom_selector = "type C or type O or type N"
+train_atom_ids = u.select_atoms(align_selector).ids 
+train_atom_indices = train_atom_ids - 1 # minus one, such that the index starts from 0
 
-"""
-#One could also use the alignment methods provided in MDAnalysis package 
-rmsd_list = []
-for idx in range(head_frames):
-    rmsd_ret = rms.rmsd(trajectory[idx,selected_ids-1,:], ref_pos[selected_ids-1,:], superposition=False)
-    rmsd_list.append(rmsd_ret)
+#preprocessing the trajectory data
+preprocessing_layer = Preprocessing(ref.atoms.positions, selected_ids-1, train_atom_indices)
+traj = preprocessing_layer(trajectory)
 
-align.AlignTraj(u,  # trajectory to align
-                ref,  # reference
-                select=align_selector,  # selection of atoms to align
-                filename=None,  # file to write the trajectory to
-                in_memory=True,
-                match_atoms=True,  # whether to match atoms based on mass
-               ).run()
+#input dimension of nn
+input_dim = 3 * len(train_atom_ids)
+print ('\n{} Atoms used in define neural network:\n'.format(len(train_atom_ids)), atoms_info.loc[atoms_info['id'].isin(train_atom_ids)][['id','name', 'type']])
 
-print ('\n[Task 1/2] done.')
-
-rmsd_list_aligned = []
-for ts in u.trajectory[:head_frames]:
-    rmsd_ret = rms.rmsd(u.select_atoms(align_selector).positions, ref.select_atoms(align_selector).positions, superposition=False)
-    rmsd_list_aligned.append(rmsd_ret)
-"""
-
+# print information of trajectory
+print ('\nshape of preprocessed trajectory data array:\n {}'.format(traj.shape))
 print ('\n[Task 2/2] done.')
-
-#print RMSD values before and after alignment
-print ('\nfirst {} distances before alignment:\n\t'.format(head_frames), dist_list)
-print ('\nfirst {} distances after alignment:\n\t'.format(head_frames), dist_list_aligned)
 
 # -
 
@@ -179,7 +212,7 @@ view
 
 # +
 #Auto encoders class and functions for training.
-def create_seqential_nn(layer_dims, activation=torch.nn.Tanh()):
+def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers = []
     for i in range(len(layer_dims)-2) :
         layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
@@ -187,45 +220,7 @@ def create_seqential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
     
     return torch.nn.Sequential(*layers).double()
-       
-class Encoder(torch.nn.Module):
-    def __init__(self, align_func, encoder_dims, activation=torch.nn.Tanh(), atom_indices=None):
-        """Initialise auto encoder
-
-        :param encoder_dims: list, List of dimensions for encoder, including input/output layers
-        """
-        super(Encoder, self).__init__()
-        self.encoder_dims = encoder_dims
-        self.align_func = align_func
-        self.atom_indices = torch.tensor(atom_indices).long()
-        self.encoder = create_seqential_nn(encoder_dims, activation)
-
-    def forward(self, inp):
-        # flatten the data
-        if self.atom_indices is None: # use all atoms
-            inp = torch.flatten(inp, start_dim=1)            
-        else: # use selected atoms
-            inp = torch.flatten(inp[:,self.atom_indices,:], start_dim=1)
-        encoded = self.encoder(inp)
-        return encoded
-    
-    def show_info(self):
-        print ('atom indices used in input layer: ', self.atom_indices.numpy())
-        self.align_func.show_info()
-        print ('Network:\n', self.encoder)
-
-    def xi(self, x, is_aligned=False):
-        """Collective variable defined through the encoder 
-        
-        :return: xi: np.array
-        """
-        with torch.no_grad():
-            if torch.is_tensor(x) == False:
-                x = torch.from_numpy(x).double()
-            if is_aligned == False:
-                x = self.align_func(x)
-            return self.forward(x).detach().numpy()
-
+         
 # Next, we define the training function 
 def train(model, optimizer, writer, traj, weights, train_atom_indices, num_epochs=10, batch_size=32, test_ratio=0.2):
     """Function to train an AE model
@@ -272,7 +267,7 @@ def train(model, optimizer, writer, traj, weights, train_atom_indices, num_epoch
             # Forward pass to get output
             out = model(X)
             # Evaluate loss
-            loss = loss_func(out, torch.flatten(X[:,train_atom_indices,:],start_dim=1))
+            loss = loss_func(out, X)
             # Get gradient with respect to parameters of the model
             loss.backward()
             # Store loss
@@ -287,7 +282,7 @@ def train(model, optimizer, writer, traj, weights, train_atom_indices, num_epoch
             for iteration, X in enumerate(test_loader):
                 out = model(X)
                 # Evaluate loss
-                loss = loss_func(out, torch.flatten(X[:,train_atom_indices,:],start_dim=1))
+                loss = loss_func(out,X)
                 # Store loss
                 test_loss.append(loss)
             loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
@@ -320,37 +315,26 @@ batch_size = 10000
 num_epochs = 10
 learning_rate = 0.005
 optimizer_algo = 'Adam'  # Adam by default, otherwise SGD
-#dimensions
 
-load_model_filename = 'checkpoint/AlanineDipeptide-2022-02-18-13:11:19/trained_model.pt' #None 
+# encoded dimension
+k = 1
+e_layer_dims = [input_dim, 20, 20, k]
+d_layer_dims = [k, 20, 20, input_dim]
+print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, k))
 
-if load_model_filename is None:
-    train_atom_selector = "type C or type O or type N"
-    train_atom_ids = u.select_atoms(align_selector).ids 
-    train_atom_indices = train_atom_ids - 1 # minus one, such that the index starts from 0
+activation = torch.nn.Tanh()
+encoder = create_sequential_nn(e_layer_dims, activation)
+decoder = create_sequential_nn(d_layer_dims, activation)
+ae_model = torch.nn.Sequential(encoder, decoder) 
 
-    #input dimension
-    input_dim = 3 * len(train_atom_ids)
-    print ('{} Atoms used in define neural network:\n'.format(len(train_atom_ids)), atoms_info.loc[atoms_info['id'].isin(train_atom_ids)][['id','name', 'type']])
-
-    # encoded dimension
-    k = 1
-    e_layer_dims = [input_dim, 20, 20, k]
-    d_layer_dims = [k, 20, 20, input_dim]
-    print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, k))
-
-    activation = torch.nn.Tanh()
-    encoder = Encoder(align_functor, e_layer_dims, activation, train_atom_indices)
-    decoder = create_seqential_nn(d_layer_dims, activation)
-
-    ae_model = torch.nn.Sequential(encoder, decoder) 
-else:
-    ae_model = torch.load(load_model_filename)
-    print (f'model loaded from: {load_model_filename}')
-    ae_model[0].show_info()
-    
 print ('Autoencoder:\n', ae_model)
 
+load_model_filename = 'checkpoint/AlanineDipeptide-2022-02-18-23:41:05/trained_model.pt' #None #'checkpoint/AlanineDipeptide-2022-02-18-13:11:19/trained_model.pt' #None 
+    
+if load_model_filename is not None:
+    ae_model.load_state_dict(torch.load(load_model_filename))
+    print (f'model parameters loaded from: {load_model_filename}')
+    
 # path to store log data
 model_save_dir = 'checkpoint'
 prefix = f"{sys_name}-" 
@@ -372,7 +356,7 @@ else:
 ae_model, loss_list = train(ae_model, 
                             optimizer, 
                             writer,
-                            trajectory, 
+                            traj, 
                             np.ones(trajectory.shape[0]), 
                             train_atom_indices,
                             batch_size=batch_size, 
@@ -381,7 +365,7 @@ ae_model, loss_list = train(ae_model,
 
 #save the model
 trained_model_filename = f'{model_path}/trained_model.pt'
-torch.save(ae_model, trained_model_filename)  
+torch.save(ae_model.state_dict(), trained_model_filename)  
 print (f'trained model is saved at: {trained_model_filename}\n')
 
 #--- Compute average train per epoch ---
@@ -391,7 +375,7 @@ for i in range(len(loss_list)):
 loss_evol1 = np.array(loss_evol1)
 # -
 
-# Plot the results 
+# #### (optional) plot the results 
 
 # +
 save_fig_to_file = False
@@ -406,3 +390,33 @@ if save_fig_to_file :
     fig_filename = 'training_loss_%s.jpg' % pot_name
     fig.savefig(fig_filename)
     print ('training loss plotted to file: %s' % fig_filename)
+
+
+# -
+# #### define CVs using encoder, script, and save to file.
+
+# +
+class ColVar(torch.nn.Module):
+    def __init__(self, preprocessing_layer, encoder):
+        super(ColVar, self).__init__()
+        self.preprocessing_layer = preprocessing_layer
+        self.encoder = encoder
+    def forward(self, inp):
+        return self.encoder(self.preprocessing_layer(inp))
+    
+cv = ColVar(preprocessing_layer, encoder)
+
+trained_script_cv_filename = f'{model_path}/trained_scripted_cv.pt'
+torch.jit.script(cv).save(trained_script_cv_filename)
+
+print (f'script model for CVs is saved at:\n\t{trained_script_cv_filename}\n')
+# -
+
+
+cv = torch.jit.load(trained_script_cv_filename)
+print (cv)
+print (cv(trajectory))
+
+
+
+
