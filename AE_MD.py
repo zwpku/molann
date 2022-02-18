@@ -64,6 +64,10 @@ class Align(object):
         self.ref_x = self.ref_x - ref_c
         self.num_atoms = len(align_atom_indices) * 3
         
+    def show_info(self):
+        print (f'\nAlignment:\n indices of {len(self.atom_indices)} Atoms used in alignment:\n\t', self.atom_indices)
+        print ('\n\treference state used in aligment:\n', self.ref_x.numpy())
+        
     def dist_to_ref(self, traj):
         return torch.linalg.norm(torch.sub(traj[:,self.atom_indices,:], self.ref_x), dim=(1,2)).numpy()     
             
@@ -152,8 +156,6 @@ print ('\n[Task 2/2] done.')
 print ('\nfirst {} distances before alignment:\n\t'.format(head_frames), dist_list)
 print ('\nfirst {} distances after alignment:\n\t'.format(head_frames), dist_list_aligned)
 
-
-
 # -
 
 # #### (optional) display information
@@ -193,8 +195,9 @@ class Encoder(torch.nn.Module):
         :param encoder_dims: list, List of dimensions for encoder, including input/output layers
         """
         super(Encoder, self).__init__()
+        self.encoder_dims = encoder_dims
         self.align_func = align_func
-        self.atom_indices = atom_indices
+        self.atom_indices = torch.tensor(atom_indices).long()
         self.encoder = create_seqential_nn(encoder_dims, activation)
 
     def forward(self, inp):
@@ -205,6 +208,11 @@ class Encoder(torch.nn.Module):
             inp = torch.flatten(inp[:,self.atom_indices,:], start_dim=1)
         encoded = self.encoder(inp)
         return encoded
+    
+    def show_info(self):
+        print ('atom indices used in input layer: ', self.atom_indices.numpy())
+        self.align_func.show_info()
+        print ('Network:\n', self.encoder)
 
     def xi(self, x, is_aligned=False):
         """Collective variable defined through the encoder 
@@ -286,8 +294,9 @@ def train(model, optimizer, writer, traj, weights, train_atom_indices, num_epoch
             
         writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
         writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
-        
+                        
     print ("training ends.\n") 
+    
     return model, loss_list
 # -
 
@@ -305,41 +314,50 @@ def set_seed_all(seed=-1):
 seed = None 
 if seed:
     set_seed_all(seed)
+  
+#set training parameters
+batch_size = 10000
+num_epochs = 10
+learning_rate = 0.005
+optimizer_algo = 'Adam'  # Adam by default, otherwise SGD
+#dimensions
 
+load_model_filename = 'checkpoint/AlanineDipeptide-2022-02-18-13:11:19/trained_model.pt' #None 
+
+if load_model_filename is None:
+    train_atom_selector = "type C or type O or type N"
+    train_atom_ids = u.select_atoms(align_selector).ids 
+    train_atom_indices = train_atom_ids - 1 # minus one, such that the index starts from 0
+
+    #input dimension
+    input_dim = 3 * len(train_atom_ids)
+    print ('{} Atoms used in define neural network:\n'.format(len(train_atom_ids)), atoms_info.loc[atoms_info['id'].isin(train_atom_ids)][['id','name', 'type']])
+
+    # encoded dimension
+    k = 1
+    e_layer_dims = [input_dim, 20, 20, k]
+    d_layer_dims = [k, 20, 20, input_dim]
+    print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, k))
+
+    activation = torch.nn.Tanh()
+    encoder = Encoder(align_functor, e_layer_dims, activation, train_atom_indices)
+    decoder = create_seqential_nn(d_layer_dims, activation)
+
+    ae_model = torch.nn.Sequential(encoder, decoder) 
+else:
+    ae_model = torch.load(load_model_filename)
+    print (f'model loaded from: {load_model_filename}')
+    ae_model[0].show_info()
+    
+print ('Autoencoder:\n', ae_model)
+
+# path to store log data
 model_save_dir = 'checkpoint'
 prefix = f"{sys_name}-" 
 model_path = os.path.join(model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
 print ('\nLog directory: {}\n'.format(model_path))
 writer = SummaryWriter(model_path)
-    
-#set training parameters
-batch_size = 10000
-num_epochs = 500
-learning_rate = 0.005
-optimizer_algo = 'Adam'  # Adam by default, otherwise SGD
-#dimensions
 
-train_atom_selector = "type C or type O or type N"
-train_atom_ids = u.select_atoms(align_selector).ids 
-train_atom_indices = train_atom_ids - 1 # minus one, such that the index starts from 0
-
-#input dimension
-input_dim = 3 * len(train_atom_ids)
-print ('{} Atoms used in define neural network:\n'.format(len(train_atom_ids)), atoms_info.loc[atoms_info['id'].isin(train_atom_ids)][['id','name', 'type']])
-
-# encoded dimension
-k = 1
-e_layer_dims = [input_dim, 20, 20, k]
-d_layer_dims = [k, 20, 20, input_dim]
-print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, k))
-
-activation = torch.nn.Tanh()
-encoder = Encoder(align_functor, e_layer_dims, activation, train_atom_indices)
-decoder = create_seqential_nn(d_layer_dims, activation)
-
-ae_model = torch.nn.Sequential(encoder, decoder) 
-
-print ('Autoencoder:\n', ae_model)
 # -
 
 # #### start training 
@@ -360,6 +378,11 @@ ae_model, loss_list = train(ae_model,
                             batch_size=batch_size, 
                             num_epochs=num_epochs
                             )
+
+#save the model
+trained_model_filename = f'{model_path}/trained_model.pt'
+torch.save(ae_model, trained_model_filename)  
+print (f'trained model is saved at: {trained_model_filename}\n')
 
 #--- Compute average train per epoch ---
 loss_evol1 = []
@@ -383,6 +406,3 @@ if save_fig_to_file :
     fig_filename = 'training_loss_%s.jpg' % pot_name
     fig.savefig(fig_filename)
     print ('training loss plotted to file: %s' % fig_filename)
-# -
-
-
