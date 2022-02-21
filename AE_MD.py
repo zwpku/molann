@@ -43,6 +43,7 @@ class MyArgs(object):
         self.use_gpu =config['Training'].getboolean('use_gpu')
         self.batch_size = config['Training'].getint('batch_size')
         self.num_epochs = config['Training'].getint('num_epochs')
+        self.test_ratio = config['Training'].getfloat('test_ratio')
         self.learning_rate = config['Training'].getfloat('learning_rate')
         self.optimizer = config['Training']['optimizer']
         self.k = config['Training'].getint('encoded_dim')
@@ -50,6 +51,7 @@ class MyArgs(object):
         self.d_layer_dims = [int(x) for x in config['Training']['decoder_hidden_layer_dims'].split(',')]
         self.load_model_filename =  config['Training']['load_model_filename']
         self.model_save_dir = config['Training']['model_save_dir'] 
+        self.save_model_every_step = config['Training'].getint('save_model_every_step')
         
         self.activation_name = config['Training']['activation'] 
         self.activation = getattr(torch.nn, self.activation_name) 
@@ -69,9 +71,6 @@ class MyArgs(object):
             self.device = torch.device('cpu')
 
         print (f'Parameters loaded from: {config_filename}\n')
-
-# ## Part 1: prepare MD data
-# #### 1.1. show some information
 
 class Trajectory(object):
     def __init__(self, args):
@@ -120,9 +119,7 @@ class Trajectory(object):
                                           self.trajectory.shape
                                          )
               )
-
-
-# #### 1.2 load trajectory, and align with respect to refenrence
+        self.weights = np.ones(self.trajectory.shape[0])
 
 class Preprocessing(torch.nn.Module):
     
@@ -180,9 +177,7 @@ class Preprocessing(torch.nn.Module):
         inp = self.align(inp)
         inp = torch.flatten(inp[:,self.train_atom_indices,:], start_dim=1)
         return inp
-    
 
-# #### define CVs using encoder, script, and save to file.
 
 class ColVar(torch.nn.Module):
     def __init__(self, preprocessing_layer, encoder):
@@ -192,27 +187,36 @@ class ColVar(torch.nn.Module):
     def forward(self, inp):
         return self.encoder(self.preprocessing_layer(inp))
 
-# ## Part 2: Training
-#
-# #### define neural network model and training function
+#Auto encoders class and functions for training.
+def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
+    layers = []
+    for i in range(len(layer_dims)-2) :
+        layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
+        layers.append(activation)
+    layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
+
+    return torch.nn.Sequential(*layers).double()
+
+class AutoEncoder(torch.nn.Module):
+    def __init__(self, e_layer_dims, d_layer_dims, activation=torch.nn.Tanh()):
+        super(AutoEncoder, self).__init__()
+        self.encoder = create_sequential_nn(e_layer_dims, activation)
+        self.decoder = create_sequential_nn(d_layer_dims, activation)
+
+    def forward(self, inp):
+        return self.decoder(self.encoder(inp))
 
 # +
-class Trainer(object):
-    def __init__(self, args, traj_obj, preprocessing_layer):
-        #input dimension of nn
-        self.input_dim = 3 * len(preprocessing_layer.train_atom_ids)
-        self.e_layer_dims = [self.input_dim] + args.e_layer_dims + [args.k]
-        self.d_layer_dims = [args.k] + args.d_layer_dims + [self.input_dim]
-        print ('\n{} Atoms used in define neural network:\n'.format(len(preprocessing_layer.train_atom_ids)), \
-                        traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(preprocessing_layer.train_atom_ids)][['id','name', 'type']])
+class TrainingTask(object):
+    def __init__(self, args, traj_obj, preprocessing_layer, ae_model):
 
-        self.encoder = self.create_sequential_nn(self.e_layer_dims, args.activation())
-        self.decoder = self.create_sequential_nn(self.d_layer_dims, args.activation())
-        self.ae_model = torch.nn.Sequential(self.encoder, self.decoder) 
+        self.ae_model = ae_model
         self.learning_rate = args.learning_rate
         self.preprocessing_layer = preprocessing_layer
-
-        print ('Autoencoder:\n', self.ae_model)
+        self.num_epochs= args.num_epochs
+        self.batch_size = args.batch_size 
+        self.test_ratio = args.test_ratio
+        self.save_model_every_step = args.save_model_every_step
 
         if os.path.isfile(args.load_model_filename): 
             self.ae_model.load_state_dict(torch.load(args.load_model_filename))
@@ -229,82 +233,59 @@ class Trainer(object):
         print ('\nLog directory: {}\n'.format(self.model_path))
         self.writer = SummaryWriter(self.model_path)
 
-        # encoded dimension
-        print ('\nInput dim: {},\tencoded dim: {}\n'.format(self.input_dim, args.k))
-
         self.traj = self.preprocessing_layer(traj_obj.trajectory)
+
+        self.traj_weights = traj_obj.weights
 
         # print information of trajectory
         print ('\nshape of preprocessed trajectory data array:\n {}'.format(self.traj.shape))
-
-    #Auto encoders class and functions for training.
-    def create_sequential_nn(self, layer_dims, activation=torch.nn.Tanh()):
-        layers = []
-        for i in range(len(layer_dims)-2) :
-            layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
-            layers.append(activation)
-        layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
-        
-        return torch.nn.Sequential(*layers).double()
          
     def save_model(self):
         #save the model
         trained_model_filename = f'{self.model_path}/trained_model.pt'
         torch.save(self.ae_model.state_dict(), trained_model_filename)  
-        print (f'trained model is saved at: {trained_model_filename}\n')
+        print (f'trained model is saved at:\n\t{trained_model_filename}\n')
 
-        cv = ColVar(preprocessing_layer, encoder)
+        cv = ColVar(self.preprocessing_layer, self.ae_model.encoder)
 
-        trained_script_cv_filename = f'{self.model_path}/trained_scripted_cv.pt'
-        torch.jit.script(cv).save(trained_script_cv_filename)
+        trained_cv_script_filename = f'{self.model_path}/trained_cv_scripted.pt'
+        torch.jit.script(cv).save(trained_cv_script_filename)
 
-        print (f'script model for CVs is saved at:\n\t{trained_script_cv_filename}\n')
+        print (f'script model for CVs is saved at:\n\t{trained_cv_script_filename}\n')
 
 # Next, we define the training function 
-    def train(model, optimizer, writer, traj, weights, train_atom_indices, num_epochs=10, batch_size=32, test_ratio=0.2):
+    def train(self):
         """Function to train an AE model
-        
-        :param model: Neural network model built with PyTorch,
-        :param optimizer: PyTorch optimizer object
-        :param writer: SummaryWriter for log
-        :param traj: torch tensor, trajectory data, shape = (traj. length, no. of atom, 3)
-        :param weights: np.array, weights of each point of the trajectory when the dynamics is biased, ndim == 1
-        :param num_epochs: int, number of times the training goes through the whole dataset
-        :param batch_size: int, number of data points per batch for estimation of the gradient
-        :param test_size: float, between 0 and 1, giving the proportion of points used to compute test loss
-
-        :return: model, trained neural net model
-        :return: loss_list, list of lists of train losses and test losses; one per batch per epoch
         """
         #--- prepare the data ---
         # split the dataset into a training set (and its associated weights) and a test set
-        X_train, X_test, w_train, w_test = train_test_split(traj, weights, test_size=test_ratio)  
+        X_train, X_test, w_train, w_test = train_test_split(self.traj, self.traj_weights, test_size=self.test_ratio)  
         # intialization of the methods to sample with replacement from the data points (needed since weights are present)
         train_sampler = torch.utils.data.WeightedRandomSampler(w_train, len(w_train))
         test_sampler  = torch.utils.data.WeightedRandomSampler(w_test, len(w_test))
         # method to construct data batches and iterate over them
         train_loader = torch.utils.data.DataLoader(dataset=X_train,
-                                                   batch_size=batch_size,
+                                                   batch_size=self.batch_size,
                                                    shuffle=False,
                                                    sampler=train_sampler)
         test_loader  = torch.utils.data.DataLoader(dataset=X_test,
-                                                   batch_size=batch_size,
+                                                   batch_size=self.batch_size,
                                                    shuffle=False,
                                                    sampler=test_sampler)
         
         loss_func = torch.nn.MSELoss()
         # --- start the training over the required number of epochs ---
-        loss_list = []
-        print ("\ntraining starts, %d epochs in total." % num_epochs) 
-        for epoch in tqdm(range(num_epochs)):
+        self.loss_list = []
+        print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
+        for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset
-            model.train()
+            self.ae_model.train()
             train_loss = []
             for iteration, X in enumerate(train_loader):
                 # Clear gradients w.r.t. parameters
-                optimizer.zero_grad()
+                self.optimizer.zero_grad()
                 # Forward pass to get output
-                out = model(X)
+                out = self.ae_model(X)
                 # Evaluate loss
                 loss = loss_func(out, X)
                 # Get gradient with respect to parameters of the model
@@ -312,57 +293,70 @@ class Trainer(object):
                 # Store loss
                 train_loss.append(loss)
                 # Updating parameters
-                optimizer.step()
+                self.optimizer.step()
             # Evaluate the test loss on the test dataset
-            model.eval()
+            self.ae_model.eval()
             with torch.no_grad():
                 # Evaluation of test loss
                 test_loss = []
                 for iteration, X in enumerate(test_loader):
-                    out = model(X)
+                    out = self.ae_model(X)
                     # Evaluate loss
                     loss = loss_func(out,X)
                     # Store loss
                     test_loss.append(loss)
-                loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
+                self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
                 
-            writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
-            writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
-                            
+            self.writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
+            self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
+
+            if epoch % self.save_model_every_step == 0 :
+                self.save_model()
+
         print ("training ends.\n") 
-        
-        return model, loss_list
 
     def output_loss(self):
         loss_evol1 = []
-        for i in range(len(loss_list)):
-            loss_evol1.append([torch.mean(loss_list[i][0]), torch.mean(loss_list[i][1])])
+        for i in range(len(self.loss_list)):
+            loss_evol1.append([torch.mean(self.loss_list[i][0]), torch.mean(self.loss_list[i][1])])
         loss_evol1 = np.array(loss_evol1)
 
-        save_fig_to_file = False
         start_epoch_index = 1
         ax  = plt.axes() 
-        ax.plot(range(start_epoch_index, num_epochs), loss_evol1[start_epoch_index:, 0], '--', label='train loss', marker='o')
+        ax.plot(range(start_epoch_index, self.num_epochs), loss_evol1[start_epoch_index:, 0], '--', label='train loss', marker='o')
         ax.plot(range(1, num_epochs), loss_evol1[start_epoch_index:, 1], '-.', label='test loss', marker='+')
         ax.legend()
         ax.set_title('losses')
 
-        if save_fig_to_file :
-            fig_filename = 'training_loss_%s.jpg' % pot_name
-            fig.savefig(fig_filename)
-            print ('training loss plotted to file: %s' % fig_filename)
+        fig_filename = 'training_loss_%s.jpg' % pot_name
+        fig.savefig(fig_filename)
+        print ('training loss plotted to file: %s' % fig_filename)
 # -
 
 def main():
+
     args = MyArgs()
 
     traj_obj = Trajectory(args)
+
     #preprocessing the trajectory data
     preprocessing_layer = Preprocessing(args, traj_obj)
 
-    train_obj = Trainer(args, traj_obj, preprocessing_layer)
+    input_dim = 3 * len(preprocessing_layer.train_atom_ids)
+    e_layer_dims = [input_dim] + args.e_layer_dims + [args.k]
+    d_layer_dims = [args.k] + args.d_layer_dims + [input_dim]
+
+    ae_model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
+
+    print ('\nAutoencoder:\n', ae_model)
+    # encoded dimension
+    print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, args.k))
+    #input dimension of nn
+    print ('\n{} Atoms used in define neural network:\n'.format(len(preprocessing_layer.train_atom_ids)), \
+                    traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(preprocessing_layer.train_atom_ids)][['id','name', 'type']])
+
+    train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model)
     train_obj.train()
-    train_obj.save_model()
 
 if __name__ == "__main__":
     main()
