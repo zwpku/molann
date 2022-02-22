@@ -57,7 +57,7 @@ class MyArgs(object):
         self.activation = getattr(torch.nn, self.activation_name) 
 
         self.align_selector = config['Training']['align_mda_selector']
-        self.train_atom_selector = config['Training']['train_mda_selector'] 
+        self.feature_file = config['Training']['feature_file']
         self.seed = config['Training'].getint('seed')
 
         if self.seed:
@@ -121,33 +121,67 @@ class Trajectory(object):
               )
         self.weights = np.ones(self.trajectory.shape[0])
 
-class Preprocessing(torch.nn.Module):
-    
-    def __init__(self, args, traj_obj):
+class FeatureMap(torch.nn.Module):
+    def __init__(self, feature_type_list, ag_list):
+        super(FeatureMap, self).__init__()
+        self.feature_type_list = feature_type_list
+        self.ag_list = ag_list
 
-        super(Preprocessing, self).__init__()
+    def map_to_feature(self, x, idx: int):
+        feature_type = self.feature_type_list[idx]
+        ag = self.ag_list[idx]
 
-        self.align_atom_ids = traj_obj.u.select_atoms(args.align_selector).ids
-        self.train_atom_ids = traj_obj.u.select_atoms(args.train_atom_selector).ids 
+        if feature_type == 0 : # angle
+            r21 = x[:, ag[0], :] - x[:, ag[1], :]
+            r23 = x[:, ag[2], :] - x[:, ag[1], :]
+            r21l = torch.norm(r21, dim=1, keepdim=True)
+            r23l = torch.norm(r23, dim=1, keepdim=True)
+            cos_angle = (r21 * r23).sum(dim=1, keepdim=True) / (r21l * r23l)
+            return cos_angle
 
-        print ('\nInfor of preprocess layer.\naligning by atoms:')
-        print (traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(self.align_atom_ids)][['id','name', 'type']])
+        if feature_type == 1 : # bond length
+            r12 = x[:, ag[1], :] - x[:, ag[0], :]
+            return torch.norm(r12, dim=1, keepdim=True)
 
+        if feature_type == 2 : # dihedral angle
+            r12 = x[:, ag[1], :] - x[:, ag[0], :]
+            r23 = x[:, ag[2], :] - x[:, ag[1], :]
+            r34 = x[:, ag[3], :] - x[:, ag[2], :]
+            n1 = torch.cross(r12, r23)
+            n2 = torch.cross(r23, r34)
+            cos_phi = (n1*n2).sum(dim=1, keepdim=True)
+            sin_phi = (n1 * r34).sum(dim=1, keepdim=True) * torch.norm(r23, dim=1, keepdim=True)
+            radius = torch.sqrt(cos_phi**2 + sin_phi**2)
+            return torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
+
+        if feature_type == 3: # atom_position 
+            return x[:, ag, :].reshape((-1, len(ag) * 3))
+
+        raise RuntimeError()
+
+    def forward(self, x):
+        xf = self.map_to_feature(x, 0)
+        for i in range(1, len(self.feature_type_list)) :
+            # Each column corresponds to one feature 
+            xf = torch.cat((xf, self.map_to_feature(x, i)), dim=1)
+        return xf
+
+class Align(torch.nn.Module):
+    def __init__(self, ref_pos, align_atom_ids):
+        super(Align, self).__init__()
+        self.align_atom_ids = align_atom_ids 
         self.align_atom_indices = torch.tensor(self.align_atom_ids-1).long() # minus one, such that the index starts from 0
-        self.train_atom_indices = torch.tensor(self.train_atom_ids-1).long() 
-
-        self.ref_x = torch.from_numpy(traj_obj.ref_pos[self.align_atom_indices, :]).double()        
+        self.ref_x = torch.from_numpy(ref_pos[self.align_atom_indices, :]).double()        
 
         # shift reference state 
         ref_c = torch.mean(self.ref_x, 0) 
         self.ref_x = self.ref_x - ref_c
-        
+
     def show_info(self):
         print ('atom indices used for alignment: ', self.align_atom_indices.numpy())
-        print ('atom indices used for input layer: ', self.train_atom_indices.numpy())
         print ('\n\treference state used in aligment:\n', self.ref_x.numpy())
 
-    def align(self, traj):  
+    def forward(self, traj):  
         """
         align trajectory by translation and rotation
         """
@@ -172,12 +206,95 @@ class Preprocessing(torch.nn.Module):
         aligned_traj = torch.matmul(traj-x_c, rotate_mat) 
                 
         return aligned_traj     
-    
-    def forward(self, inp):
-        inp = self.align(inp)
-        inp = torch.flatten(inp[:,self.train_atom_indices,:], start_dim=1)
-        return inp
 
+class FeatureFileReader(object):
+    def __init__(self, feature_file, section_name, universe, use_all_positions_by_default=False):
+
+        self.feature_file = feature_file
+        self.section_name = section_name
+        self.use_all_positions_by_default = use_all_positions_by_default
+        self.available_feature_types = ['angle', 'bond', 'dihedral', 'atom_position']
+        self.u = universe
+
+    def read(self):
+
+        feature_type_list = []
+        feature_ag_list = []
+        feature_name_list = []
+        output_dim = 0 
+
+        pp_cfg_file = open(self.feature_file, "r")
+        in_section = False
+
+        for line in pp_cfg_file:
+            line = line.strip()
+
+            if not line or line.startswith("#") : 
+                continue 
+
+            if line.startswith("["):
+                if line.strip('[]') == self.section_name :
+                    in_section = True
+                    continue 
+                if line.strip('[]') == 'End':
+                    break
+
+            if in_section :
+                print ('line=',line)
+
+                feature_name, selector = line.split(',')
+
+                if feature_name not in self.available_feature_types :
+                    raise NotImplementedError(f'map to feature {feature_name} not implemented')
+
+                ag = self.u.select_atoms(selector).ids
+
+                if feature_name == 'angle': 
+                    assert len(ag)==3, '3 atoms are needed to define an angle, {} provided'.format(len(ag))
+                    output_dim += 1 
+                    type_id = 0 
+                if feature_name == 'bond': 
+                    assert len(ag)==2, '2 atoms are needed to define a bond length, {} provided'.format(len(ag))
+                    output_dim += 1 
+                    type_id = 1 
+                if feature_name == 'dihedral': 
+                    assert len(ag)==4, '4 atoms are needed to define a dihedral angle, {} provided'.format(len(ag))
+                    output_dim += 1 
+                    type_id = 2 
+                if feature == 'atom_position':
+                    output_dim += 3 * len(ag)
+                    type_id = 3 
+
+                feature_name_list.append(feature_name)
+                feature_type_list.append(type_id)
+                feature_ag_list.append( torch.tensor(ag-1) )
+
+        pp_cfg_file.close()
+
+        num_features = len(feature_type_list)
+
+        if num_features == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
+            print ("No valid features found, use positions of all atoms.\n") 
+            feature_type_list.append(3) 
+            feature_name_list.append('atom_position') 
+            ag = self.u.atoms.ids 
+            feature_ag_list.append(torch.tensor(ag-1))
+            num_features = 1
+            output_dim = 3 * len(ag)
+
+        return feature_type_list, feature_name_list, feature_ag_list, output_dim 
+
+class Preprocessing(torch.nn.Module):
+    
+    def __init__(self, feature_mapper, align_layer=torch.nn.Identity()):
+
+        super(Preprocessing, self).__init__()
+
+        self.feature_mapper = feature_mapper 
+        self.align = align_layer
+
+    def forward(self, inp):
+        return self.feature_mapper(self.align(inp))
 
 class ColVar(torch.nn.Module):
     def __init__(self, preprocessing_layer, encoder):
@@ -208,7 +325,7 @@ class AutoEncoder(torch.nn.Module):
 
 # +
 class TrainingTask(object):
-    def __init__(self, args, traj_obj, preprocessing_layer, ae_model):
+    def __init__(self, args, traj_obj, preprocessing_layer, ae_model, output_feature_mapper=None):
 
         self.ae_model = ae_model
         self.learning_rate = args.learning_rate
@@ -217,6 +334,7 @@ class TrainingTask(object):
         self.batch_size = args.batch_size 
         self.test_ratio = args.test_ratio
         self.save_model_every_step = args.save_model_every_step
+        self.output_feature_mapper = output_feature_mapper
 
         if os.path.isfile(args.load_model_filename): 
             self.ae_model.load_state_dict(torch.load(args.load_model_filename))
@@ -244,14 +362,14 @@ class TrainingTask(object):
         #save the model
         trained_model_filename = f'{self.model_path}/trained_model.pt'
         torch.save(self.ae_model.state_dict(), trained_model_filename)  
-        print (f'trained model is saved at:\n\t{trained_model_filename}\n')
+        print (f'trained model saved at:\n\t{trained_model_filename}\n')
 
         cv = ColVar(self.preprocessing_layer, self.ae_model.encoder)
 
         trained_cv_script_filename = f'{self.model_path}/trained_cv_scripted.pt'
         torch.jit.script(cv).save(trained_cv_script_filename)
 
-        print (f'script model for CVs is saved at:\n\t{trained_cv_script_filename}\n')
+        print (f'script model for CVs saved at:\n\t{trained_cv_script_filename}\n')
 
 # Next, we define the training function 
     def train(self):
@@ -339,23 +457,46 @@ def main():
 
     traj_obj = Trajectory(args)
 
-    #preprocessing the trajectory data
-    preprocessing_layer = Preprocessing(args, traj_obj)
+    feature_reader = FeatureFileReader(args.feature_file, 'Preprocessing', traj_obj.u, use_all_positions_by_default=True)
+    feature_type_list, feature_name_list, feature_ag_list, feature_dim = feature_reader.read()
+    feature_mapper = FeatureMap(feature_type_list, feature_ag_list)
 
-    input_dim = 3 * len(preprocessing_layer.train_atom_ids)
-    e_layer_dims = [input_dim] + args.e_layer_dims + [args.k]
-    d_layer_dims = [args.k] + args.d_layer_dims + [input_dim]
+    print ('Feature List:\n\tName\tAtoms')
+    for idx in range(len(feature_name_list)):
+        print (feature_name_list, feature_ag_list)
+
+    if 'atom_position' in feature_name_list :
+        align_atom_ids = traj_obj.u.select_atoms(args.align_selector).ids
+        print ('\nAdd Alignment layer in preprocess layer.\naligning by atoms:')
+        print (traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']])
+        align = Align(traj_obj.ref_pos, align_atom_ids)
+    else :
+        align = torch.nn.Identity()
+
+    #preprocessing the trajectory data
+    preprocessing_layer = Preprocessing(feature_mapper, align)
+
+    e_layer_dims = [feature_dim] + args.e_layer_dims + [args.k]
+    d_layer_dims = [args.k] + args.d_layer_dims + [feature_dim]
 
     ae_model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
 
     print ('\nAutoencoder:\n', ae_model)
     # encoded dimension
-    print ('\nInput dim: {},\tencoded dim: {}\n'.format(input_dim, args.k))
-    #input dimension of nn
-    print ('\n{} Atoms used in define neural network:\n'.format(len(preprocessing_layer.train_atom_ids)), \
-                    traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(preprocessing_layer.train_atom_ids)][['id','name', 'type']])
+    print ('\nInput dim: {},\tencoded dim: {}\n'.format(feature_dim, args.k))
 
-    train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model)
+    feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u)
+    feature_type_list, feature_name_list, feature_ag_list, feature_dim = feature_reader.read()
+
+    if feature_dim == 2 :
+        print ('2d feature List for output:\n\tName\tAtoms')
+        for idx in range(len(feature_name_list)):
+            print (feature_name_list, feature_ag_list)
+        output_feature_mapper = FeatureMap(feature_type_list, feature_ag_list)
+    else :
+        output_feature_mapper = None
+
+    train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model, output_feature_mapper)
     train_obj.train()
 
 if __name__ == "__main__":
