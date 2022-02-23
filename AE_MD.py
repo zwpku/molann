@@ -32,6 +32,11 @@ class TrainingTask(object):
         print ('\nLog directory: {}\n'.format(self.model_path))
         self.writer = SummaryWriter(self.model_path)
 
+        if self.output_feature_mapper is not None:
+            self.output_features = self.output_feature_mapper(traj_obj.trajectory).detach().numpy()
+        else :
+            self.output_features = None
+
         self.traj = self.preprocessing_layer(traj_obj.trajectory)
 
         self.traj_weights = traj_obj.weights
@@ -58,16 +63,16 @@ class TrainingTask(object):
         """
         #--- prepare the data ---
         # split the dataset into a training set (and its associated weights) and a test set
-        X_train, X_test, w_train, w_test = train_test_split(self.traj, self.traj_weights, test_size=self.test_ratio)  
+        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(self.traj, self.traj_weights, torch.arange(self.traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
         # intialization of the methods to sample with replacement from the data points (needed since weights are present)
         train_sampler = torch.utils.data.WeightedRandomSampler(w_train, len(w_train))
         test_sampler  = torch.utils.data.WeightedRandomSampler(w_test, len(w_test))
         # method to construct data batches and iterate over them
-        train_loader = torch.utils.data.DataLoader(dataset=X_train,
+        train_loader = torch.utils.data.DataLoader(dataset = torch.utils.data.TensorDataset(X_train, index_train),
                                                    batch_size=self.batch_size,
                                                    shuffle=False,
                                                    sampler=train_sampler)
-        test_loader  = torch.utils.data.DataLoader(dataset=X_test,
+        test_loader  = torch.utils.data.DataLoader(dataset= torch.utils.data.TensorDataset(X_test, index_test),
                                                    batch_size=self.batch_size,
                                                    shuffle=False,
                                                    sampler=test_sampler)
@@ -80,7 +85,7 @@ class TrainingTask(object):
             # Train the model by going through the whole dataset
             self.ae_model.train()
             train_loss = []
-            for iteration, X in enumerate(train_loader):
+            for iteration, [X, index] in enumerate(train_loader):
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
                 # Forward pass to get output
@@ -98,7 +103,7 @@ class TrainingTask(object):
             with torch.no_grad():
                 # Evaluation of test loss
                 test_loss = []
-                for iteration, X in enumerate(test_loader):
+                for iteration, [X, index] in enumerate(test_loader):
                     out = self.ae_model(X)
                     # Evaluate loss
                     loss = loss_func(out,X)
@@ -109,8 +114,8 @@ class TrainingTask(object):
             self.writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
             self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
 
-            if self.output_feature_mapper is not None :
-                self.plot_encoder_scattered_on_feature_space(X, epoch)
+            if self.output_features is not None :
+                self.plot_encoder_scattered_on_feature_space(X, index, epoch)
 
             if epoch % self.save_model_every_step == 0 :
                 self.save_model()
@@ -134,24 +139,33 @@ class TrainingTask(object):
         fig.savefig(fig_filename)
         print ('training loss plotted to file: %s' % fig_filename)
 
-    def plot_encoder_scattered_on_feature_space(self, X, epoch): 
+    def plot_encoder_scattered_on_feature_space(self, X, index, epoch): 
 
-        feature_data = self.output_feature_mapper(X)
+        feature_data = self.output_features[index,:]
         encoded_val = self.ae_model.encoder(X)
         k = encoded_val.size(1)
 
-        for idx in range(k):
+        for idx in range(k) :
             fig, ax = plt.subplots()
-            sc = ax.scatter(feature_data[:,0], feature_data[:,1], s=2.0, c=encoded_val[:,idx], cmap='jet')
+            sc = ax.scatter(feature_data[:,0], feature_data[:,1], s=2.0, c=encoded_val[:,idx].detach().numpy(), cmap='jet')
 
-            ax.set_title(f'{idx}th dimension', fontsize=27)
+            ax.set_title(f'{idx+1}th dimension', fontsize=27)
+            ax.set_xlabel(r'$\phi_1$', fontsize=25, labelpad=3, rotation=0)
+            ax.set_xticks([-3, -2, -1, 0, 1, 2, 3])
+            ax.set_yticks([-3, -2, -1, 0, 1, 2, 3])
+            ax.set_ylabel(r'$\phi_2$', fontsize=25, labelpad=-10, rotation=0)
+
+            cax = fig.add_axes([0.92, 0.10, .02, 0.80])
+            cbar = fig.colorbar(sc, cax=cax)
+            cbar.ax.tick_params(labelsize=20)
 
             fig_name = f'{self.model_path}/scattered_encoder_{epoch}_{idx}.png'
             plt.savefig(fig_name, dpi=200, bbox_inches='tight')
+            plt.close()
 
             self.writer.add_image(f'scattered encoder {idx}', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), global_step=epoch, dataformats='HWC')
 
-# -
+        print (f'scattered encoder plot for {epoch}th epoch saved.') 
 
 def main():
 
@@ -160,14 +174,15 @@ def main():
     traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename)
 
     feature_reader = FeatureFileReader(args.feature_file, 'Preprocessing', traj_obj.u, use_all_positions_by_default=True)
-    feature_type_list, feature_name_list, feature_ag_list, feature_dim = feature_reader.read()
+    feature_type_list, feature_name_list, feature_ag_list = feature_reader.read()
     feature_mapper = FeatureMap(feature_type_list, feature_ag_list)
+    feature_dim = feature_mapper.feature_dimension()
 
-    print ('Feature List:\n\tName\tAtoms')
+    print ('Feature List:\nId.\tName\tAtomIDs')
     for idx in range(len(feature_name_list)):
-        print (feature_name_list, feature_ag_list)
+        print (idx, feature_name_list[idx], feature_ag_list[idx])
 
-    if 'atom_position' in feature_name_list :
+    if 'position' in feature_name_list :
         align_atom_ids = traj_obj.u.select_atoms(args.align_selector).ids
         print ('\nAdd Alignment layer in preprocess layer.\naligning by atoms:')
         print (traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']])
@@ -188,17 +203,19 @@ def main():
     print ('\nInput dim: {},\tencoded dim: {}\n'.format(feature_dim, args.k))
 
     feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u)
-    feature_type_list, feature_name_list, feature_ag_list, feature_dim = feature_reader.read()
+    feature_type_list, feature_name_list, feature_ag_list = feature_reader.read()
 
-    if feature_dim == 2 :
-        print ('2d feature List for output:\n\tName\tAtoms')
+    if len(feature_type_list) == 2 :
+        print ('2d feature List for output:\nId.\tName\tAtomIDs')
         for idx in range(len(feature_name_list)):
-            print (feature_name_list, feature_ag_list)
-        output_feature_mapper = FeatureMap(feature_type_list, feature_ag_list)
+            print (idx, feature_name_list[idx], feature_ag_list[idx])
+        output_feature_mapper = FeatureMap(feature_type_list, feature_ag_list, use_angle_value=True)
     else :
+        print (f'2d feature required, {len(feature_type_list)} are provided.')
         output_feature_mapper = None
 
     train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model, output_feature_mapper)
+
     train_obj.train()
 
 if __name__ == "__main__":

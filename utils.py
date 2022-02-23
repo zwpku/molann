@@ -123,10 +123,28 @@ class Trajectory(object):
         self.weights = np.ones(self.trajectory.shape[0])
 
 class FeatureMap(torch.nn.Module):
-    def __init__(self, feature_type_list, ag_list):
+    def __init__(self, feature_type_list, ag_list, use_angle_value=False):
         super(FeatureMap, self).__init__()
         self.feature_type_list = feature_type_list
-        self.ag_list = ag_list
+        self.ag_list = torch.tensor([x-1 for x in ag_list]) # minus one, so that it starts from 0
+        self.use_angle_value = use_angle_value
+
+    def feature_dimension(self):
+        output_dim = 0
+        for i in range(len(self.feature_type_list)) :
+            feature_type = self.feature_type_list[i]
+            if feature_type == 0 : 
+                output_dim += 1 
+            if feature_type == 1 : 
+                output_dim += 1 
+            if feature_type == 2 : 
+                if self.use_angle_value == True :
+                    output_dim += 1 
+                else :
+                    output_dim += 2 
+            if feature_type == 3 :
+                output_dim += 3 * len(self.ag_list[i])
+        return output_dim 
 
     def map_to_feature(self, x, idx: int):
         feature_type = self.feature_type_list[idx]
@@ -138,7 +156,10 @@ class FeatureMap(torch.nn.Module):
             r21l = torch.norm(r21, dim=1, keepdim=True)
             r23l = torch.norm(r23, dim=1, keepdim=True)
             cos_angle = (r21 * r23).sum(dim=1, keepdim=True) / (r21l * r23l)
-            return cos_angle
+            if self.use_angle_value :
+                return torch.acos(cos_angle)
+            else :
+                return cos_angle
 
         if feature_type == 1 : # bond length
             r12 = x[:, ag[1], :] - x[:, ag[0], :]
@@ -153,7 +174,11 @@ class FeatureMap(torch.nn.Module):
             cos_phi = (n1*n2).sum(dim=1, keepdim=True)
             sin_phi = (n1 * r34).sum(dim=1, keepdim=True) * torch.norm(r23, dim=1, keepdim=True)
             radius = torch.sqrt(cos_phi**2 + sin_phi**2)
-            return torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
+
+            if self.use_angle_value :
+                return torch.atan2(sin_phi, cos_phi)
+            else :
+                return torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
 
         if feature_type == 3: # atom_position 
             return x[:, ag, :].reshape((-1, len(ag) * 3))
@@ -214,7 +239,7 @@ class FeatureFileReader(object):
         self.feature_file = feature_file
         self.section_name = section_name
         self.use_all_positions_by_default = use_all_positions_by_default
-        self.available_feature_types = ['angle', 'bond', 'dihedral', 'atom_position']
+        self.available_feature_types = ['angle', 'bond', 'dihedral', 'position']
         self.u = universe
 
     def read(self):
@@ -222,7 +247,6 @@ class FeatureFileReader(object):
         feature_type_list = []
         feature_ag_list = []
         feature_name_list = []
-        output_dim = 0 
 
         pp_cfg_file = open(self.feature_file, "r")
         in_section = False
@@ -237,12 +261,10 @@ class FeatureFileReader(object):
                 if line.strip('[]') == self.section_name :
                     in_section = True
                     continue 
-                if line.strip('[]') == 'End':
+                if in_section and line.strip('[]') == 'End':
                     break
 
             if in_section :
-                print ('line=',line)
-
                 feature_name, selector = line.split(',')
 
                 if feature_name not in self.available_feature_types :
@@ -252,23 +274,19 @@ class FeatureFileReader(object):
 
                 if feature_name == 'angle': 
                     assert len(ag)==3, '3 atoms are needed to define an angle, {} provided'.format(len(ag))
-                    output_dim += 1 
                     type_id = 0 
                 if feature_name == 'bond': 
                     assert len(ag)==2, '2 atoms are needed to define a bond length, {} provided'.format(len(ag))
-                    output_dim += 1 
                     type_id = 1 
                 if feature_name == 'dihedral': 
                     assert len(ag)==4, '4 atoms are needed to define a dihedral angle, {} provided'.format(len(ag))
-                    output_dim += 1 
                     type_id = 2 
-                if feature == 'atom_position':
-                    output_dim += 3 * len(ag)
+                if feature_name == 'position':
                     type_id = 3 
 
                 feature_name_list.append(feature_name)
                 feature_type_list.append(type_id)
-                feature_ag_list.append( torch.tensor(ag-1) )
+                feature_ag_list.append(ag)
 
         pp_cfg_file.close()
 
@@ -277,13 +295,12 @@ class FeatureFileReader(object):
         if num_features == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
             print ("No valid features found, use positions of all atoms.\n") 
             feature_type_list.append(3) 
-            feature_name_list.append('atom_position') 
+            feature_name_list.append('position') 
             ag = self.u.atoms.ids 
-            feature_ag_list.append(torch.tensor(ag-1))
+            feature_ag_list.append(ag)
             num_features = 1
-            output_dim = 3 * len(ag)
 
-        return feature_type_list, feature_name_list, feature_ag_list, output_dim 
+        return feature_type_list, feature_name_list, feature_ag_list 
 
 class Preprocessing(torch.nn.Module):
     

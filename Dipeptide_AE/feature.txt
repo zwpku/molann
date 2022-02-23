@@ -1,6 +1,8 @@
 [Preprocessing]
-
+#position, type C or type O or type N
+position, resid 2 
 [End]
 [Output]
-
+dihedral, bynum 5 7 9 15 
+dihedral, bynum 7 9 15 17
 [End]
