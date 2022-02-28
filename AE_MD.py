@@ -6,7 +6,7 @@ from utils import *
 
 # +
 class TrainingTask(object):
-    def __init__(self, args, traj_obj, preprocessing_layer, ae_model, output_feature_mapper=None):
+    def __init__(self, args, traj_obj, preprocessing_layer, ae_model, histogram_feature_mapper=None, output_feature_mapper=None):
 
         self.ae_model = ae_model
         self.learning_rate = args.learning_rate
@@ -15,6 +15,7 @@ class TrainingTask(object):
         self.batch_size = args.batch_size 
         self.test_ratio = args.test_ratio
         self.save_model_every_step = args.save_model_every_step
+        self.histogram_feature_mapper = histogram_feature_mapper
         self.output_feature_mapper = output_feature_mapper
 
         if os.path.isfile(args.load_model_filename): 
@@ -32,7 +33,28 @@ class TrainingTask(object):
         print ('\nLog directory: {}\n'.format(self.model_path))
         self.writer = SummaryWriter(self.model_path)
 
-        if self.output_feature_mapper is not None:
+        if self.histogram_feature_mapper is not None :
+            histogram_feature = self.histogram_feature_mapper(traj_obj.trajectory).detach().numpy()
+            feature_names = self.histogram_feature_mapper.feature_all_names()
+            df = pd.DataFrame(data=histogram_feature, columns=feature_names) 
+
+            fig, ax = plt.subplots()
+            df.hist(ax=ax)
+            fig_name = f'{self.model_path}/histogram_feature.png'
+            fig.savefig(fig_name, dpi=200, bbox_inches='tight')
+            plt.close()
+            self.writer.add_image(f'histogram features', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), dataformats='HWC')
+
+            df.plot(subplots=True) 
+            plt.legend(loc='best')
+            fig_name = f'{self.model_path}/feature_along_trajectory.png'
+            plt.savefig(fig_name, dpi=200, bbox_inches='tight')
+            plt.close()
+            self.writer.add_image(f'feature along trajectory', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), dataformats='HWC')
+
+            print (f'Histogram and trajectory plots of features saved.') 
+
+        if self.output_feature_mapper is not None :
             self.output_features = self.output_feature_mapper(traj_obj.trajectory).detach().numpy()
         else :
             self.output_features = None
@@ -43,7 +65,7 @@ class TrainingTask(object):
 
         # print information of trajectory
         print ('\nshape of preprocessed trajectory data array:\n {}'.format(self.traj.shape))
-         
+
     def save_model(self):
         #save the model
         trained_model_filename = f'{self.model_path}/trained_model.pt'
@@ -150,10 +172,10 @@ class TrainingTask(object):
             sc = ax.scatter(feature_data[:,0], feature_data[:,1], s=2.0, c=encoded_val[:,idx].detach().numpy(), cmap='jet')
 
             ax.set_title(f'{idx+1}th dimension', fontsize=27)
-            ax.set_xlabel(r'$\phi_1$', fontsize=25, labelpad=3, rotation=0)
+            ax.set_xlabel(r'{}'.format(self.output_feature_mapper.feature_name(0)), fontsize=25, labelpad=3, rotation=0)
             ax.set_xticks([-3, -2, -1, 0, 1, 2, 3])
             ax.set_yticks([-3, -2, -1, 0, 1, 2, 3])
-            ax.set_ylabel(r'$\phi_2$', fontsize=25, labelpad=-10, rotation=0)
+            ax.set_ylabel(r'{}'.format(self.output_feature_mapper.feature_name(1)), fontsize=25, labelpad=-10, rotation=0)
 
             cax = fig.add_axes([0.92, 0.10, .02, 0.80])
             cbar = fig.colorbar(sc, cax=cax)
@@ -169,20 +191,27 @@ class TrainingTask(object):
 
 def main():
 
+    # Read configuration parameters
     args = MyArgs()
 
+    # Read trajectory
     traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename)
 
+    # Read preprocessing file
     feature_reader = FeatureFileReader(args.feature_file, 'Preprocessing', traj_obj.u, use_all_positions_by_default=True)
-    feature_type_list, feature_name_list, feature_ag_list = feature_reader.read()
-    feature_mapper = FeatureMap(feature_type_list, feature_ag_list)
-    feature_dim = feature_mapper.feature_dimension()
+    feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list = feature_reader.read()
+    
+    # Define the map to feature space
+    feature_mapper = FeatureMap(feature_name_list, feature_type_id_list, feature_ag_list)
+    feature_dim = feature_mapper.feature_total_dimension()
 
-    print ('Feature List:\nId.\tName\tAtomIDs')
+    # Display information of features used 
+    print ('Feature List:\nId.\tName\tType\tAtomIDs')
     for idx in range(len(feature_name_list)):
-        print (idx, feature_name_list[idx], feature_ag_list[idx])
+        print ( idx, feature_name_list[idx], feature_type_list[idx], feature_ag_list[idx])
 
-    if 'position' in feature_name_list :
+    # Add alignment layer if position is used
+    if 'position' in feature_type_list :
         align_atom_ids = traj_obj.u.select_atoms(args.align_selector).ids
         print ('\nAdd Alignment layer in preprocess layer.\naligning by atoms:')
         print (traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']])
@@ -190,32 +219,48 @@ def main():
     else :
         align = torch.nn.Identity()
 
-    #preprocessing the trajectory data
+    # Define preprocessing layer
     preprocessing_layer = Preprocessing(feature_mapper, align)
 
     e_layer_dims = [feature_dim] + args.e_layer_dims + [args.k]
     d_layer_dims = [args.k] + args.d_layer_dims + [feature_dim]
 
+    # Define autoencoder
     ae_model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
 
+    # Show the model
     print ('\nAutoencoder:\n', ae_model)
-    # encoded dimension
+    # Encoded dimension
     print ('\nInput dim: {},\tencoded dim: {}\n'.format(feature_dim, args.k))
 
-    feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u)
-    feature_type_list, feature_name_list, feature_ag_list = feature_reader.read()
+    # Feature used for h print
+    feature_reader = FeatureFileReader(args.feature_file, 'Histogram', traj_obj.u, ignore_position_feature=True)
+    feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list = feature_reader.read()
 
-    if len(feature_type_list) == 2 :
-        print ('2d feature List for output:\nId.\tName\tAtomIDs')
+    print ('Features for histogram plot:\nId.\tName\tType\tAtomIDs')
+    for idx in range(len(feature_name_list)):
+        print (idx, feature_name_list[idx], feature_type_list[idx], feature_ag_list[idx])
+    histogram_feature_mapper = FeatureMap(feature_name_list, feature_type_id_list, feature_ag_list, use_angle_value=True)
+
+    assert histogram_feature_mapper.feature_total_dimension() == len(feature_name_list), "Feature map for histogram is incorrect" 
+
+    # Feature used for output
+    feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u, ignore_position_feature=True)
+    feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list = feature_reader.read()
+
+    if len(feature_name_list) == 2 : # Use it only if it is 2D
+        print ('2d feature List for output:\nId.\tName\tType\tAtomIDs')
         for idx in range(len(feature_name_list)):
-            print (idx, feature_name_list[idx], feature_ag_list[idx])
-        output_feature_mapper = FeatureMap(feature_type_list, feature_ag_list, use_angle_value=True)
+            print (idx, feature_name_list[idx], feature_type_list[idx], feature_ag_list[idx])
+        output_feature_mapper = FeatureMap(feature_name_list, feature_type_id_list, feature_ag_list, use_angle_value=True)
     else :
         print (f'2d feature required, {len(feature_type_list)} are provided.')
         output_feature_mapper = None
 
-    train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model, output_feature_mapper)
+    # Define training task
+    train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model, histogram_feature_mapper, output_feature_mapper)
 
+    # Train autoencoder
     train_obj.train()
 
 if __name__ == "__main__":

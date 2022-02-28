@@ -123,34 +123,41 @@ class Trajectory(object):
         self.weights = np.ones(self.trajectory.shape[0])
 
 class FeatureMap(torch.nn.Module):
-    def __init__(self, feature_type_list, ag_list, use_angle_value=False):
+    def __init__(self, feature_name_list, feature_type_id_list, ag_list, use_angle_value=False):
         super(FeatureMap, self).__init__()
-        self.feature_type_list = feature_type_list
-        self.ag_list = torch.tensor([x-1 for x in ag_list]) # minus one, so that it starts from 0
+        self.feature_name_list = feature_name_list
+        self.feature_type_id_list = feature_type_id_list
+        self.ag_list = [torch.tensor(x-1) for x in ag_list] # minus one, so that it starts from 0
         self.use_angle_value = use_angle_value
 
-    def feature_dimension(self):
+    def feature_name(self, idx):
+        return self.feature_name_list[idx]
+
+    def feature_all_names(self):
+        return self.feature_name_list
+
+    def feature_total_dimension(self):
         output_dim = 0
-        for i in range(len(self.feature_type_list)) :
-            feature_type = self.feature_type_list[i]
-            if feature_type == 0 : 
+        for i in range(len(self.feature_type_id_list)) :
+            feature_id = self.feature_type_id_list[i]
+            if feature_id == 0 : 
                 output_dim += 1 
-            if feature_type == 1 : 
+            if feature_id == 1 : 
                 output_dim += 1 
-            if feature_type == 2 : 
+            if feature_id == 2 : 
                 if self.use_angle_value == True :
                     output_dim += 1 
                 else :
                     output_dim += 2 
-            if feature_type == 3 :
+            if feature_id == 3 :
                 output_dim += 3 * len(self.ag_list[i])
         return output_dim 
 
     def map_to_feature(self, x, idx: int):
-        feature_type = self.feature_type_list[idx]
+        feature_id = self.feature_type_id_list[idx]
         ag = self.ag_list[idx]
 
-        if feature_type == 0 : # angle
+        if feature_id == 0 : # angle
             r21 = x[:, ag[0], :] - x[:, ag[1], :]
             r23 = x[:, ag[2], :] - x[:, ag[1], :]
             r21l = torch.norm(r21, dim=1, keepdim=True)
@@ -161,11 +168,11 @@ class FeatureMap(torch.nn.Module):
             else :
                 return cos_angle
 
-        if feature_type == 1 : # bond length
+        if feature_id == 1 : # bond length
             r12 = x[:, ag[1], :] - x[:, ag[0], :]
             return torch.norm(r12, dim=1, keepdim=True)
 
-        if feature_type == 2 : # dihedral angle
+        if feature_id == 2 : # dihedral angle
             r12 = x[:, ag[1], :] - x[:, ag[0], :]
             r23 = x[:, ag[2], :] - x[:, ag[1], :]
             r34 = x[:, ag[3], :] - x[:, ag[2], :]
@@ -180,15 +187,15 @@ class FeatureMap(torch.nn.Module):
             else :
                 return torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
 
-        if feature_type == 3: # atom_position 
+        if feature_id == 3: # atom_position 
             return x[:, ag, :].reshape((-1, len(ag) * 3))
 
         raise RuntimeError()
 
     def forward(self, x):
         xf = self.map_to_feature(x, 0)
-        for i in range(1, len(self.feature_type_list)) :
-            # Each column corresponds to one feature 
+        for i in range(1, len(self.feature_type_id_list)) :
+            # Features are stored in columns 
             xf = torch.cat((xf, self.map_to_feature(x, i)), dim=1)
         return xf
 
@@ -234,19 +241,21 @@ class Align(torch.nn.Module):
         return aligned_traj     
 
 class FeatureFileReader(object):
-    def __init__(self, feature_file, section_name, universe, use_all_positions_by_default=False):
+    def __init__(self, feature_file, section_name, universe, ignore_position_feature=False, use_all_positions_by_default=False):
 
         self.feature_file = feature_file
         self.section_name = section_name
         self.use_all_positions_by_default = use_all_positions_by_default
         self.available_feature_types = ['angle', 'bond', 'dihedral', 'position']
+        self.ignore_position_feature = ignore_position_feature
         self.u = universe
 
     def read(self):
 
-        feature_type_list = []
+        feature_type_id_list = []
         feature_ag_list = []
         feature_name_list = []
+        feature_type_list = []
 
         pp_cfg_file = open(self.feature_file, "r")
         in_section = False
@@ -265,42 +274,46 @@ class FeatureFileReader(object):
                     break
 
             if in_section :
-                feature_name, selector = line.split(',')
+                feature_name, feature_type, selector = line.split(',')
+                feature_type = feature_type.strip()
 
-                if feature_name not in self.available_feature_types :
-                    raise NotImplementedError(f'map to feature {feature_name} not implemented')
+                if feature_type not in self.available_feature_types :
+                    raise NotImplementedError(f'map to feature {feature_type} not implemented')
 
                 ag = self.u.select_atoms(selector).ids
 
-                if feature_name == 'angle': 
+                if feature_type == 'angle': 
                     assert len(ag)==3, '3 atoms are needed to define an angle, {} provided'.format(len(ag))
                     type_id = 0 
-                if feature_name == 'bond': 
+                if feature_type == 'bond': 
                     assert len(ag)==2, '2 atoms are needed to define a bond length, {} provided'.format(len(ag))
                     type_id = 1 
-                if feature_name == 'dihedral': 
+                if feature_type == 'dihedral': 
                     assert len(ag)==4, '4 atoms are needed to define a dihedral angle, {} provided'.format(len(ag))
                     type_id = 2 
-                if feature_name == 'position':
+                if feature_type == 'position':
+                    if self.ignore_position_feature :
+                        continue
                     type_id = 3 
 
                 feature_name_list.append(feature_name)
-                feature_type_list.append(type_id)
+                feature_type_list.append(feature_type)
+                feature_type_id_list.append(type_id)
                 feature_ag_list.append(ag)
 
         pp_cfg_file.close()
 
-        num_features = len(feature_type_list)
+        num_features = len(feature_type_id_list)
 
         if num_features == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
             print ("No valid features found, use positions of all atoms.\n") 
-            feature_type_list.append(3) 
-            feature_name_list.append('position') 
+            feature_type_id_list.append(3) 
+            feature_type_list.append('type') 
             ag = self.u.atoms.ids 
             feature_ag_list.append(ag)
             num_features = 1
 
-        return feature_type_list, feature_name_list, feature_ag_list 
+        return feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list 
 
 class Preprocessing(torch.nn.Module):
     
@@ -308,8 +321,8 @@ class Preprocessing(torch.nn.Module):
 
         super(Preprocessing, self).__init__()
 
-        self.feature_mapper = feature_mapper 
         self.align = align_layer
+        self.feature_mapper = feature_mapper 
 
     def forward(self, inp):
         return self.feature_mapper(self.align(inp))

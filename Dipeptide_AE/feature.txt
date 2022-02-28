@@ -1,8 +1,17 @@
 [Preprocessing]
 #position, type C or type O or type N
-position, resid 2 
+p1, position, resid 2 
 [End]
 [Output]
-dihedral, bynum 5 7 9 15 
-dihedral, bynum 7 9 15 17
+d1, dihedral, bynum 5 7 9 15 
+d2, dihedral, bynum 7 9 15 17
 [End]
+[Histogram]
+d1, dihedral, bynum 5 7 9 15 
+d2, dihedral, bynum 7 9 15 17
+b1, bond, bynum 2 5
+b2, bond, bynum 5 6
+a1, angle, bynum 20 19 21
+a2, angle, bynum 16 15 17
+[End]
+
