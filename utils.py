@@ -9,69 +9,13 @@ from sklearn.model_selection import train_test_split
 
 import MDAnalysis as mda
 from MDAnalysis.analysis import dihedrals 
-import nglview as nv
 import pandas as pd
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 import os
 import time
-import argparse
-import json
 from datetime import datetime
-import configparser
-
 # -
-
-def set_all_seeds(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        np.random.seed(seed)
-    random.seed(seed)
-
-class MyArgs(object):
-
-    def __init__(self, config_filename='params.cfg'):
-
-        config = configparser.ConfigParser()
-        config.read(config_filename)
-
-        self.pdb_filename = config['System']['pdb_filename']
-        self.traj_dcd_filename = config['System']['traj_dcd_filename']
-        self.sys_name = config['System']['sys_name']
-          
-        #set training parameters
-        self.use_gpu =config['Training'].getboolean('use_gpu')
-        self.batch_size = config['Training'].getint('batch_size')
-        self.num_epochs = config['Training'].getint('num_epochs')
-        self.test_ratio = config['Training'].getfloat('test_ratio')
-        self.learning_rate = config['Training'].getfloat('learning_rate')
-        self.optimizer = config['Training']['optimizer']
-        self.k = config['Training'].getint('encoded_dim')
-        self.e_layer_dims = [int(x) for x in config['Training']['encoder_hidden_layer_dims'].split(',')]
-        self.d_layer_dims = [int(x) for x in config['Training']['decoder_hidden_layer_dims'].split(',')]
-        self.load_model_filename =  config['Training']['load_model_filename']
-        self.model_save_dir = config['Training']['model_save_dir'] 
-        self.save_model_every_step = config['Training'].getint('save_model_every_step')
-        
-        self.activation_name = config['Training']['activation'] 
-        self.activation = getattr(torch.nn, self.activation_name) 
-
-        self.align_selector = config['Training']['align_mda_selector']
-        self.feature_file = config['Training']['feature_file']
-        self.seed = config['Training'].getint('seed')
-
-        if self.seed:
-            set_all_seeds(self.seed)
-
-        # encoded dimension
-        # CUDA support
-        if torch.cuda.is_available() and self.use_gpu:
-            self.device = torch.device('cuda')
-        else:
-            self.device = torch.device('cpu')
-
-        print (f'Parameters loaded from: {config_filename}\n')
 
 class Trajectory(object):
     def __init__(self, pdb_filename, traj_dcd_filename):
@@ -122,24 +66,54 @@ class Trajectory(object):
               )
         self.weights = np.ones(self.trajectory.shape[0])
 
+class Feature(object):
+    def __init__(self, name, feature_type, ag):
+
+        if feature_type not in ['angle', 'bond', 'dihedral', 'position']:
+            raise NotImplementedError(f'feature {feature_type} not implemented')
+
+        if feature_type == 'angle': 
+            assert len(ag)==3, '3 atoms are needed to define an angle, {} provided'.format(len(ag))
+            type_id = 0 
+        if feature_type == 'bond': 
+            assert len(ag)==2, '2 atoms are needed to define a bond length, {} provided'.format(len(ag))
+            type_id = 1 
+        if feature_type == 'dihedral': 
+            assert len(ag)==4, '4 atoms are needed to define a dihedral angle, {} provided'.format(len(ag))
+            type_id = 2 
+        if feature_type == 'position':
+            type_id = 3 
+
+        self.name = name
+        self.type_name = feature_type
+        self.atom_group = ag
+        self.type_id = type_id
+
 class FeatureMap(torch.nn.Module):
-    def __init__(self, feature_name_list, feature_type_id_list, ag_list, use_angle_value=False):
+    def __init__(self, feature_list, use_angle_value=False):
         super(FeatureMap, self).__init__()
-        self.feature_name_list = feature_name_list
-        self.feature_type_id_list = feature_type_id_list
-        self.ag_list = [torch.tensor(x-1) for x in ag_list] # minus one, so that it starts from 0
+        self.num_features = len(feature_list)
+        self.name_list = [f.name for f in feature_list]
+        self.type_list = [f.type_name for f in feature_list]
+        self.type_id_list = [f.type_id for f in feature_list]
+        self.ag_list = [torch.tensor(f.atom_group-1) for f in feature_list] # minus one, so that it starts from 0
         self.use_angle_value = use_angle_value
 
+    def info(self, info_title):
+        print (f'{info_title}Id.\tName\tType\tAtomIDs')
+        for idx in range(self.num_features):
+            print ('{}\t{}\t{}\t{}'.format(idx, self.name_list[idx], self.type_list[idx], self.ag_list[idx].numpy()))
+
     def feature_name(self, idx):
-        return self.feature_name_list[idx]
+        return self.name_list[idx]
 
     def feature_all_names(self):
-        return self.feature_name_list
+        return self.name_list
 
     def feature_total_dimension(self):
         output_dim = 0
-        for i in range(len(self.feature_type_id_list)) :
-            feature_id = self.feature_type_id_list[i]
+        for i in range(len(self.type_id_list)) :
+            feature_id = self.type_id_list[i]
             if feature_id == 0 : 
                 output_dim += 1 
             if feature_id == 1 : 
@@ -154,7 +128,7 @@ class FeatureMap(torch.nn.Module):
         return output_dim 
 
     def map_to_feature(self, x, idx: int):
-        feature_id = self.feature_type_id_list[idx]
+        feature_id = self.type_id_list[idx]
         ag = self.ag_list[idx]
 
         if feature_id == 0 : # angle
@@ -194,7 +168,7 @@ class FeatureMap(torch.nn.Module):
 
     def forward(self, x):
         xf = self.map_to_feature(x, 0)
-        for i in range(1, len(self.feature_type_id_list)) :
+        for i in range(1, len(self.type_id_list)) :
             # Features are stored in columns 
             xf = torch.cat((xf, self.map_to_feature(x, i)), dim=1)
         return xf
@@ -246,16 +220,12 @@ class FeatureFileReader(object):
         self.feature_file = feature_file
         self.section_name = section_name
         self.use_all_positions_by_default = use_all_positions_by_default
-        self.available_feature_types = ['angle', 'bond', 'dihedral', 'position']
         self.ignore_position_feature = ignore_position_feature
         self.u = universe
 
     def read(self):
 
-        feature_type_id_list = []
-        feature_ag_list = []
-        feature_name_list = []
-        feature_type_list = []
+        feature_list = []
 
         pp_cfg_file = open(self.feature_file, "r")
         in_section = False
@@ -275,45 +245,25 @@ class FeatureFileReader(object):
 
             if in_section :
                 feature_name, feature_type, selector = line.split(',')
-                feature_type = feature_type.strip()
-
-                if feature_type not in self.available_feature_types :
-                    raise NotImplementedError(f'map to feature {feature_type} not implemented')
 
                 ag = self.u.select_atoms(selector).ids
+                feature = Feature(feature_name.strip(), feature_type.strip(), ag)
 
-                if feature_type == 'angle': 
-                    assert len(ag)==3, '3 atoms are needed to define an angle, {} provided'.format(len(ag))
-                    type_id = 0 
-                if feature_type == 'bond': 
-                    assert len(ag)==2, '2 atoms are needed to define a bond length, {} provided'.format(len(ag))
-                    type_id = 1 
-                if feature_type == 'dihedral': 
-                    assert len(ag)==4, '4 atoms are needed to define a dihedral angle, {} provided'.format(len(ag))
-                    type_id = 2 
-                if feature_type == 'position':
-                    if self.ignore_position_feature :
-                        continue
-                    type_id = 3 
+                if feature.type_name == 'position' and self.ignore_position_feature :
+                    print (f'Position feature in section {self.section_name} ignored:\t {line}')
+                    continue
 
-                feature_name_list.append(feature_name)
-                feature_type_list.append(feature_type)
-                feature_type_id_list.append(type_id)
-                feature_ag_list.append(ag)
+                feature_list.append(feature)
 
         pp_cfg_file.close()
 
-        num_features = len(feature_type_id_list)
-
-        if num_features == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
+        if len(feature_list) == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
             print ("No valid features found, use positions of all atoms.\n") 
-            feature_type_id_list.append(3) 
-            feature_type_list.append('type') 
             ag = self.u.atoms.ids 
-            feature_ag_list.append(ag)
-            num_features = 1
+            feature = Feature('all', 'position', ag)
+            feature_list.append(feature)
 
-        return feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list 
+        return feature_list
 
 class Preprocessing(torch.nn.Module):
     

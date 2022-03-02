@@ -2,9 +2,62 @@
 # +
 import cv2 as cv
 from utils import *
+import configparser
 # -
 
 # +
+def set_all_seeds(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+    random.seed(seed)
+
+class MyArgs(object):
+
+    def __init__(self, config_filename='params.cfg'):
+
+        config = configparser.ConfigParser()
+        config.read(config_filename)
+
+        self.pdb_filename = config['System'].get('pdb_filename')
+        self.traj_dcd_filename = config['System'].get('traj_dcd_filename')
+        self.sys_name = config['System'].get('sys_name')
+          
+        #set training parameters
+        self.use_gpu =config['Training'].getboolean('use_gpu')
+        self.batch_size = config['Training'].getint('batch_size')
+        self.num_epochs = config['Training'].getint('num_epochs')
+        self.test_ratio = config['Training'].getfloat('test_ratio')
+        self.learning_rate = config['Training'].getfloat('learning_rate')
+        self.optimizer = config['Training'].get('optimizer') # 'Adam' or 'SGD'
+        self.load_model_filename =  config['Training'].get('load_model_filename')
+        self.model_save_dir = config['Training'].get('model_save_dir') 
+        self.save_model_every_step = config['Training'].getint('save_model_every_step')
+
+        # encoded dimension
+        self.k = config['Training'].getint('encoded_dim')
+        self.e_layer_dims = [int(x) for x in config['Training'].get('encoder_hidden_layer_dims').split(',')]
+        self.d_layer_dims = [int(x) for x in config['Training'].get('decoder_hidden_layer_dims').split(',')]
+        self.activation_name = config['Training'].get('activation') 
+
+        self.activation = getattr(torch.nn, self.activation_name) 
+
+        self.align_selector = config['Training'].get('align_mda_selector')
+        self.feature_file = config['Training'].get('feature_file')
+        self.seed = config['Training'].getint('seed')
+
+        if self.seed:
+            set_all_seeds(self.seed)
+
+        # CUDA support
+        if torch.cuda.is_available() and self.use_gpu:
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+        
+        print (f'Parameters loaded from: {config_filename}\n')
+
 class TrainingTask(object):
     def __init__(self, args, traj_obj, preprocessing_layer, ae_model, histogram_feature_mapper=None, output_feature_mapper=None):
 
@@ -191,76 +244,71 @@ class TrainingTask(object):
 
 def main():
 
-    # Read configuration parameters
+    # read configuration parameters
     args = MyArgs()
 
-    # Read trajectory
+    # read trajectory
     traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename)
 
-    # Read preprocessing file
+    # read features from file to define preprocessing
     feature_reader = FeatureFileReader(args.feature_file, 'Preprocessing', traj_obj.u, use_all_positions_by_default=True)
-    feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list = feature_reader.read()
+    feature_list = feature_reader.read()
     
-    # Define the map to feature space
-    feature_mapper = FeatureMap(feature_name_list, feature_type_id_list, feature_ag_list)
-    feature_dim = feature_mapper.feature_total_dimension()
+    # define the map from positions to features 
+    feature_mapper = FeatureMap(feature_list)
 
-    # Display information of features used 
-    print ('Feature List:\nId.\tName\tType\tAtomIDs')
-    for idx in range(len(feature_name_list)):
-        print ( idx, feature_name_list[idx], feature_type_list[idx], feature_ag_list[idx])
+    # display information of features used 
+    feature_mapper.info('Features in preprocessing layer:\n')
 
-    # Add alignment layer if position is used
-    if 'position' in feature_type_list :
+    if 'position' in [f.type_name for f in feature_list] : # if atom positions are used, add alignment to preprocessing layer
         align_atom_ids = traj_obj.u.select_atoms(args.align_selector).ids
-        print ('\nAdd Alignment layer in preprocess layer.\naligning by atoms:')
+        print ('\nAdd alignment to preprocessing layer.\naligning by atoms:')
         print (traj_obj.atoms_info.loc[traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']])
         align = Align(traj_obj.ref_pos, align_atom_ids)
     else :
         align = torch.nn.Identity()
 
-    # Define preprocessing layer
+    # define preprocessing layer: first align (if positions are used), then map to features
     preprocessing_layer = Preprocessing(feature_mapper, align)
 
+    # output dimension of the map 
+    feature_dim = feature_mapper.feature_total_dimension()
+
+    # sizes of feedforward neural networks
     e_layer_dims = [feature_dim] + args.e_layer_dims + [args.k]
     d_layer_dims = [args.k] + args.d_layer_dims + [feature_dim]
 
-    # Define autoencoder
+    # define autoencoder
     ae_model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
 
-    # Show the model
-    print ('\nAutoencoder:\n', ae_model)
-    # Encoded dimension
-    print ('\nInput dim: {},\tencoded dim: {}\n'.format(feature_dim, args.k))
+    # print the model
+    print ('\nAutoencoder: input dim: {}, encoded dim: {}\n'.format(feature_dim, args.k), ae_model)
 
-    # Feature used for h print
+    # read features for histogram plot
     feature_reader = FeatureFileReader(args.feature_file, 'Histogram', traj_obj.u, ignore_position_feature=True)
-    feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list = feature_reader.read()
+    feature_list = feature_reader.read()
 
-    print ('Features for histogram plot:\nId.\tName\tType\tAtomIDs')
-    for idx in range(len(feature_name_list)):
-        print (idx, feature_name_list[idx], feature_type_list[idx], feature_ag_list[idx])
-    histogram_feature_mapper = FeatureMap(feature_name_list, feature_type_id_list, feature_ag_list, use_angle_value=True)
+    histogram_feature_mapper = FeatureMap(feature_list, use_angle_value=True)
+    histogram_feature_mapper.info('Features to plot histograms\n')
 
-    assert histogram_feature_mapper.feature_total_dimension() == len(feature_name_list), "Feature map for histogram is incorrect" 
+    # make sure each feature is one-dimensional
+    assert histogram_feature_mapper.feature_total_dimension() == len(feature_list), "Feature map for histogram is incorrect" 
 
-    # Feature used for output
-    feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u, ignore_position_feature=True)
-    feature_name_list, feature_type_id_list, feature_type_list, feature_ag_list = feature_reader.read()
+    # features to define a 2d space for output
+    feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u, ignore_position_feature=True) # positions are ignored
+    feature_list= feature_reader.read()
 
-    if len(feature_name_list) == 2 : # Use it only if it is 2D
-        print ('2d feature List for output:\nId.\tName\tType\tAtomIDs')
-        for idx in range(len(feature_name_list)):
-            print (idx, feature_name_list[idx], feature_type_list[idx], feature_ag_list[idx])
-        output_feature_mapper = FeatureMap(feature_name_list, feature_type_id_list, feature_ag_list, use_angle_value=True)
+    if len(feature_list) == 2 : # use it only if it is 2D
+        output_feature_mapper = FeatureMap(feature_list, use_angle_value=True)
+        output_feature_mapper.info('2d feature List for output:\n')
     else :
-        print (f'2d feature required, {len(feature_type_list)} are provided.')
+        print (f'\nOutput feature mapper set to None, since 2d feature required for output, but {len(feature_list)} are provided.')
         output_feature_mapper = None
 
-    # Define training task
+    # define training task
     train_obj = TrainingTask(args, traj_obj, preprocessing_layer, ae_model, histogram_feature_mapper, output_feature_mapper)
 
-    # Train autoencoder
+    # train autoencoder
     train_obj.train()
 
 if __name__ == "__main__":
