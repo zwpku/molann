@@ -273,10 +273,10 @@ class Preprocessing(torch.nn.Module):
 
         self.align = align_layer
         self.feature_mapper = feature_mapper 
+        self.feature_dim = feature_mapper.feature_total_dimension()
 
     def forward(self, inp):
         return self.feature_mapper(self.align(inp))
-
 
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers = []
@@ -295,7 +295,7 @@ class ColVarAE(torch.nn.Module):
     def forward(self, inp):
         return self.encoder(self.preprocessing_layer(inp))
 
-#Auto encoders class 
+# autoencoder class 
 class AutoEncoder(torch.nn.Module):
     def __init__(self, e_layer_dims, d_layer_dims, activation=torch.nn.Tanh()):
         super(AutoEncoder, self).__init__()
@@ -305,7 +305,7 @@ class AutoEncoder(torch.nn.Module):
     def forward(self, inp):
         return self.decoder(self.encoder(inp))
 
-# Eigenfunction class
+# eigenfunction class
 class EigenFunction(torch.nn.Module):
     def __init__(self, layer_dims, k, preprocessing_layer, activation=torch.nn.Tanh()):
         super(EigenFunction, self).__init__()

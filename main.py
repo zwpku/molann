@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+# +
+import cv2 as cv
+from utils import *
+import configparser
+# -
+
+# +
+def set_all_seeds(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+    random.seed(seed)
+
+class MyArgs(object):
+
+    def __init__(self, config_filename='params.cfg'):
+
+        config = configparser.ConfigParser()
+        config.read(config_filename)
+
+        self.pdb_filename = config['System'].get('pdb_filename')
+        self.traj_dcd_filename = config['System'].get('traj_dcd_filename')
+        self.sys_name = config['System'].get('sys_name')
+          
+        #set training parameters
+        self.use_gpu =config['Training'].getboolean('use_gpu')
+        self.batch_size = config['Training'].getint('batch_size')
+        self.num_epochs = config['Training'].getint('num_epochs')
+        self.test_ratio = config['Training'].getfloat('test_ratio')
+        self.learning_rate = config['Training'].getfloat('learning_rate')
+        self.optimizer = config['Training'].get('optimizer') # 'Adam' or 'SGD'
+        self.load_model_filename =  config['Training'].get('load_model_filename')
+        self.model_save_dir = config['Training'].get('model_save_dir') 
+        self.save_model_every_step = config['Training'].getint('save_model_every_step')
+        self.train_ae = config['Training'].getboolean('train_autoencoder')
+
+        # encoded dimension
+        if self.train_ae :
+            self.k = config['Autoencoder'].getint('encoded_dim')
+            self.e_layer_dims = [int(x) for x in config['Autoencoder'].get('encoder_hidden_layer_dims').split(',')]
+            self.d_layer_dims = [int(x) for x in config['Autoencoder'].get('decoder_hidden_layer_dims').split(',')]
+            self.activation_name = config['Autoencoder'].get('activation') 
+        else :
+            self.k = config['Eigenfunction'].getint('num_eigenfunction')
+            self.layer_dims = [int(x) for x in config['Eigenfunction'].get('hidden_layer_dims').split(',')]
+            self.activation_name = config['Eigenfunction'].get('activation') 
+            self.alpha = config['Eigenfunction'].getfloat('penalty_alpha')
+            self.eig_w = [float(x) for x in config['EigenFunction'].get('eig_w').split(',')]
+
+        self.activation = getattr(torch.nn, self.activation_name) 
+
+        self.align_selector = config['Training'].get('align_mda_selector')
+        self.feature_file = config['Training'].get('feature_file')
+        self.seed = config['Training'].getint('seed')
+
+        if self.seed:
+            set_all_seeds(self.seed)
+
+        # CUDA support
+        if torch.cuda.is_available() and self.use_gpu:
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+        
+        print (f'Parameters loaded from: {config_filename}\n')
+
+def main():
+
+    # read configuration parameters
+    args = MyArgs()
+
+    # read trajectory
+    traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename)
+
+    # read features for histogram plot
+    feature_reader = FeatureFileReader(args.feature_file, 'Histogram', traj_obj.u, ignore_position_feature=True)
+    feature_list = feature_reader.read()
+
+    histogram_feature_mapper = FeatureMap(feature_list, use_angle_value=True)
+    histogram_feature_mapper.info('Features to plot histograms\n')
+
+    # make sure each feature is one-dimensional
+    assert histogram_feature_mapper.feature_total_dimension() == len(feature_list), "Feature map for histogram is incorrect" 
+
+    # features to define a 2d space for output
+    feature_reader = FeatureFileReader(args.feature_file, 'Output', traj_obj.u, ignore_position_feature=True) # positions are ignored
+    feature_list= feature_reader.read()
+
+    if len(feature_list) == 2 : # use it only if it is 2D
+        output_feature_mapper = FeatureMap(feature_list, use_angle_value=True)
+        output_feature_mapper.info('2d feature List for output:\n')
+    else :
+        print (f'\nOutput feature mapper set to None, since 2d feature required for output, but {len(feature_list)} are provided.')
+        output_feature_mapper = None
+
+    if args.train_ae :
+        # define training task
+        train_obj = AutoEncoderTask(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
+    else :
+        train_obj = EigenFunctionTask(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
+
+    train_obj.setup_model()
+
+    # train autoencoder
+    train_obj.train()
+
+if __name__ == "__main__":
+    main()
+
