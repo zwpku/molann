@@ -89,6 +89,57 @@ class Feature(object):
         self.atom_group = ag
         self.type_id = type_id
 
+class FeatureFileReader(object):
+    def __init__(self, feature_file, section_name, universe, ignore_position_feature=False, use_all_positions_by_default=False):
+
+        self.feature_file = feature_file
+        self.section_name = section_name
+        self.use_all_positions_by_default = use_all_positions_by_default
+        self.ignore_position_feature = ignore_position_feature
+        self.u = universe
+
+    def read(self):
+
+        feature_list = []
+
+        pp_cfg_file = open(self.feature_file, "r")
+        in_section = False
+
+        for line in pp_cfg_file:
+            line = line.strip()
+
+            if not line or line.startswith("#") : 
+                continue 
+
+            if line.startswith("["):
+                if line.strip('[]') == self.section_name :
+                    in_section = True
+                    continue 
+                if in_section and line.strip('[]') == 'End':
+                    break
+
+            if in_section :
+                feature_name, feature_type, selector = line.split(',')
+
+                ag = self.u.select_atoms(selector).ids
+                feature = Feature(feature_name.strip(), feature_type.strip(), ag)
+
+                if feature.type_name == 'position' and self.ignore_position_feature :
+                    print (f'Position feature in section {self.section_name} ignored:\t {line}')
+                    continue
+
+                feature_list.append(feature)
+
+        pp_cfg_file.close()
+
+        if len(feature_list) == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
+            print ("No valid features found, use positions of all atoms.\n") 
+            ag = self.u.atoms.ids 
+            feature = Feature('all', 'position', ag)
+            feature_list.append(feature)
+
+        return feature_list
+
 class FeatureMap(torch.nn.Module):
     def __init__(self, feature_list, use_angle_value=False):
         super(FeatureMap, self).__init__()
@@ -214,57 +265,6 @@ class Align(torch.nn.Module):
                 
         return aligned_traj     
 
-class FeatureFileReader(object):
-    def __init__(self, feature_file, section_name, universe, ignore_position_feature=False, use_all_positions_by_default=False):
-
-        self.feature_file = feature_file
-        self.section_name = section_name
-        self.use_all_positions_by_default = use_all_positions_by_default
-        self.ignore_position_feature = ignore_position_feature
-        self.u = universe
-
-    def read(self):
-
-        feature_list = []
-
-        pp_cfg_file = open(self.feature_file, "r")
-        in_section = False
-
-        for line in pp_cfg_file:
-            line = line.strip()
-
-            if not line or line.startswith("#") : 
-                continue 
-
-            if line.startswith("["):
-                if line.strip('[]') == self.section_name :
-                    in_section = True
-                    continue 
-                if in_section and line.strip('[]') == 'End':
-                    break
-
-            if in_section :
-                feature_name, feature_type, selector = line.split(',')
-
-                ag = self.u.select_atoms(selector).ids
-                feature = Feature(feature_name.strip(), feature_type.strip(), ag)
-
-                if feature.type_name == 'position' and self.ignore_position_feature :
-                    print (f'Position feature in section {self.section_name} ignored:\t {line}')
-                    continue
-
-                feature_list.append(feature)
-
-        pp_cfg_file.close()
-
-        if len(feature_list) == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
-            print ("No valid features found, use positions of all atoms.\n") 
-            ag = self.u.atoms.ids 
-            feature = Feature('all', 'position', ag)
-            feature_list.append(feature)
-
-        return feature_list
-
 class Preprocessing(torch.nn.Module):
     
     def __init__(self, feature_mapper, align_layer=torch.nn.Identity()):
@@ -277,15 +277,7 @@ class Preprocessing(torch.nn.Module):
     def forward(self, inp):
         return self.feature_mapper(self.align(inp))
 
-class ColVar(torch.nn.Module):
-    def __init__(self, preprocessing_layer, encoder):
-        super(ColVar, self).__init__()
-        self.preprocessing_layer = preprocessing_layer
-        self.encoder = encoder
-    def forward(self, inp):
-        return self.encoder(self.preprocessing_layer(inp))
 
-#Auto encoders class and functions for training.
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers = []
     for i in range(len(layer_dims)-2) :
@@ -295,6 +287,15 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
 
     return torch.nn.Sequential(*layers).double()
 
+class ColVarAE(torch.nn.Module):
+    def __init__(self, preprocessing_layer, encoder):
+        super(ColVar, self).__init__()
+        self.preprocessing_layer = preprocessing_layer
+        self.encoder = encoder
+    def forward(self, inp):
+        return self.encoder(self.preprocessing_layer(inp))
+
+#Auto encoders class 
 class AutoEncoder(torch.nn.Module):
     def __init__(self, e_layer_dims, d_layer_dims, activation=torch.nn.Tanh()):
         super(AutoEncoder, self).__init__()
@@ -303,4 +304,16 @@ class AutoEncoder(torch.nn.Module):
 
     def forward(self, inp):
         return self.decoder(self.encoder(inp))
+
+# Eigenfunction class
+class EigenFunction(torch.nn.Module):
+    def __init__(self, layer_dims, k, preprocessing_layer, activation=torch.nn.Tanh()):
+        super(EigenFunction, self).__init__()
+        assert layer_dims[-1] == 1, "each eigenfunction must be one-dimensional"
+        self.pre_layer = preprocessing_layer 
+        self.eigen_funcs = [create_sequential_nn(layer_dims, activation) for idx in range(k)]
+
+    def forward(self, inp):
+        xf = self.pre_layer(inp)
+        return torch.tensor([self.eigen_funcs(xf) for idx in range(k)])
 
