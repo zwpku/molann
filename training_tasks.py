@@ -344,9 +344,11 @@ class EigenFunctionTask(TrainingTask):
         # method to construct data batches and iterate over them
         train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, w_train, index_train),
                                                    batch_size=self.batch_size,
+                                                   drop_last=True,
                                                    shuffle=False)
         test_loader  = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_test, w_test, index_test),
                                                    batch_size=self.batch_size,
+                                                   drop_last=True,
                                                    shuffle=False)
         
         # --- start the training over the required number of epochs ---
@@ -356,7 +358,6 @@ class EigenFunctionTask(TrainingTask):
             # Train the model by going through the whole dataset
             self.model.train()
             train_loss = []
-            counter = 0 
             for iteration, [X, weight, index] in tqdm(enumerate(train_loader)):
                 X.requires_grad_()
                 # Clear gradients w.r.t. parameters
@@ -369,28 +370,27 @@ class EigenFunctionTask(TrainingTask):
                 train_loss.append(loss)
                 # Updating parameters
                 self.optimizer.step()
-                counter += 1 
             # Evaluate the test loss on the test dataset
-            self.model.eval()
-            with torch.no_grad():
                 # Evaluation of test loss
-                test_loss = []
-                for iteration, [X, weight, index] in enumerate(test_loader):
-                    X.requires_grad_()
-                    loss, eig_vals, penalty, cvec = self.loss_func(X, weight)
-                    # Store loss
-                    test_loss.append(loss)
-                    test_eig_vals.append(eig_vals)
-                    test_penalty.append(penalty)
+            test_loss = []
+            test_eig_vals = []
+            test_penalty = []
+            for iteration, [X, weight, index] in enumerate(test_loader):
+                X.requires_grad_()
+                loss, eig_vals, penalty, cvec = self.loss_func(X, weight)
+                # Store loss
+                test_loss.append(loss)
+                test_eig_vals.append(eig_vals)
+                test_penalty.append(penalty)
 
-                self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
+            self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
                 
             self.writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
             self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
             self.writer.add_scalar('penalty', torch.mean(torch.tensor(test_penalty)), epoch)
 
             for idx in range(self.k):
-                self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.tensor(test_eig_vals), dim=0)[idx], epoch)
+                self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.stack(test_eig_vals)[:,idx]), epoch)
 
             if self.output_features is not None :
                 self.plot_scattered_on_feature_space(X, index, epoch)

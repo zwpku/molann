@@ -5,7 +5,13 @@ import matplotlib.pyplot as plt
 import torch
 import math 
 import torch.nn as nn
-from sklearn.model_selection import train_test_split as ttsplit
+from sklearn.model_selection import train_test_split 
+import random
+import itertools 
+from tqdm import tqdm
+import os
+import time
+from tensorboardX import SummaryWriter
 
 # ## Part 1: define necessary functions and classes.
 
@@ -451,6 +457,7 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
         layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
         layers.append(activation)
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
+    return torch.nn.Sequential(*layers).double()
 
 class EigenFunction(nn.Module):
     def __init__(self, layer_dims, k, activation=torch.nn.Tanh()):
@@ -500,7 +507,7 @@ class EigenFunctionTask(object):
         self.traj = torch.from_numpy(traj_obj).double() 
         # we will compute spatial gradients
         self.traj.requires_grad_()
-        self.weights = np.ones(self.traj.shape[0])
+        self.weights = torch.ones(self.traj.shape[0])
 
         # print information of trajectory
         print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
@@ -521,6 +528,12 @@ class EigenFunctionTask(object):
         else:
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
 
+        # path to store log data
+        prefix = f"{args.pot_name}-" 
+        self.model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+        print ('\nLog directory: {}\n'.format(self.model_path))
+        self.writer = SummaryWriter(self.model_path)
+        
     def loss_func(self, X, weight):
         # Evaluate function value on data
         y = self.model(X)
@@ -563,7 +576,7 @@ class EigenFunctionTask(object):
           penalty += ((y[:, ij[0]] * y[:, ij[1]] * weight).sum() / tot_weight - mean_list[ij[0]] * mean_list[ij[1]])**2
 
         loss = 1.0 * non_penalty_loss + self.alpha * penalty 
-
+        
         return loss, eig_vals, non_penalty_loss, penalty, cvec
 
     def train(self):
@@ -575,9 +588,11 @@ class EigenFunctionTask(object):
         # method to construct data batches and iterate over them
         train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, w_train, index_train),
                                                    batch_size=self.batch_size,
+                                                   drop_last=True,
                                                    shuffle=False)
         test_loader  = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_test, w_test, index_test),
                                                    batch_size=self.batch_size,
+                                                   drop_last=True,
                                                    shuffle=False)
         
         # --- start the training over the required number of epochs ---
@@ -600,29 +615,30 @@ class EigenFunctionTask(object):
                 # Updating parameters
                 self.optimizer.step()
             # Evaluate the test loss on the test dataset
-            self.model.eval()
-            with torch.no_grad():
+            #self.model.eval()
+            #with torch.no_grad():
                 # Evaluation of test loss
-                test_loss = []
-                for iteration, [X, weight, index] in enumerate(test_loader):
-                    X.requires_grad_()
-                    loss, eig_vals, penalty, cvec = self.loss_func(X, weight)
+            test_loss = []
+            test_eig_vals = []
+            test_penalty = []
+            for iteration, [X, weight, index] in enumerate(test_loader):
+                X.requires_grad_()
+                loss, eig_vals, non_penalty_loss, penalty, cvec = self.loss_func(X, weight)
                     # Store loss
-                    test_loss.append(loss)
-                    test_eig_vals.append(eig_vals)
-                    test_penalty.append(penalty)
+                test_loss.append(loss)
+                test_eig_vals.append(eig_vals)
+                test_penalty.append(penalty)
 
-                self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
+            self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
                 
             self.writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
             self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
             self.writer.add_scalar('penalty', torch.mean(torch.tensor(test_penalty)), epoch)
 
             for idx in range(self.k):
-                self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.tensor(test_eig_vals), dim=0)[idx], epoch)
+                self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.stack(test_eig_vals)[:,idx]), epoch)
 
-            if self.output_features is not None :
-                self.plot_eigenfunc(X, index, epoch)
+            self.plot_eigenfunc(X, index, epoch)
 
         print ("training ends.\n") 
 
@@ -633,9 +649,16 @@ class EigenFunctionTask(object):
 # All the parameters are set in the cell below. 
 
 # +
+def set_all_seeds(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+    random.seed(seed)
+    
 class MyArgs(object):
 
-    def __init__(self, config_filename='params.cfg'):
+    def __init__(self, pot_name):
 
         #set training parameters
         self.use_gpu = False
@@ -645,6 +668,7 @@ class MyArgs(object):
         self.learning_rate = 0.02 
         self.optimizer = 'Adam' # 'SGD'
         self.model_save_dir = 'checkpoint'  
+        self.pot_name = pot_name
 
         self.k = 2 
         self.layer_dims = [20, 20, 20] 
@@ -681,7 +705,7 @@ T = 100000
 save = 10
 
 # for training
-args = MyArgs()
+args = MyArgs(pot_list[pot_id].__name__)
 
 save_fig_to_file = False
 
@@ -696,7 +720,7 @@ y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-2.5, 2.5], [-
 x0_list = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1] ]
 v_min_max = [[-4,3], [-4,3], [-4,7], [0.3,8], [0,5], [0,5], [0,5], [0,5] ]
 
-pot = pot_list[pot_id](beta, eps)
+pot = pot_list[pot_id](args.beta, eps)
 x_domain = x_domains[pot_id] 
 y_domain = y_domains[pot_id] 
 
@@ -736,7 +760,7 @@ if save_fig_to_file :
 x_0 = np.array(x0_list[pot_id])
 
 ### Generate the trajectory
-trajectory, _ = UnbiasedTraj(pot, x_0, delta_t=delta_t, T=T, save=save, save_energy=False, seed=seed)
+trajectory, _ = UnbiasedTraj(pot, x_0, delta_t=delta_t, T=T, save=save, save_energy=False, seed=args.seed)
 
 ### Plot the trajectory 
 fig = plt.figure(figsize=(9,3))
@@ -753,10 +777,12 @@ if save_fig_to_file :
 
 
 # +
-    # read configuration parameters
-args = MyArgs()
-
 train_obj = EigenFunctionTask(args, trajectory)
 
 # train autoencoder
 train_obj.train()
+# -
+
+
+
+
