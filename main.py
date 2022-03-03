@@ -48,6 +48,9 @@ class MyArgs(object):
             self.activation_name = config['Eigenfunction'].get('activation') 
             self.alpha = config['Eigenfunction'].getfloat('penalty_alpha')
             self.eig_w = [float(x) for x in config['EigenFunction'].get('eig_w').split(',')]
+            self.beta = config['Eigenfunction'].getfloat('beta')
+            self.diffusion_coeff = config['Eigenfunction'].getfloat('diffusion_coeff')
+            self.sort_eigvals_in_training = config['Eigenfunction'].getboolean('sort_eigvals_in_training')
 
         self.activation = getattr(torch.nn, self.activation_name) 
 
@@ -100,8 +103,6 @@ def main():
         train_obj = AutoEncoderTask(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
     else :
         train_obj = EigenFunctionTask(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
-
-    train_obj.setup_model()
 
     # train autoencoder
     train_obj.train()

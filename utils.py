@@ -287,9 +287,9 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
 
     return torch.nn.Sequential(*layers).double()
 
-class ColVarAE(torch.nn.Module):
+class AEColVar(torch.nn.Module):
     def __init__(self, preprocessing_layer, encoder):
-        super(ColVar, self).__init__()
+        super(AEColVar, self).__init__()
         self.preprocessing_layer = preprocessing_layer
         self.encoder = encoder
     def forward(self, inp):

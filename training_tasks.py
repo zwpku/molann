@@ -1,4 +1,3 @@
-
 from utils import *
 import itertools 
 
@@ -15,7 +14,6 @@ class TrainingTask(object):
         self.traj_obj = traj_obj
         self.args = args
         self.k = args.k
-
 
         # path to store log data
         prefix = f"{args.sys_name}-" 
@@ -48,6 +46,7 @@ class TrainingTask(object):
             self.output_features = self.output_feature_mapper(traj_obj.trajectory).detach().numpy()
         else :
             self.output_features = None
+
 
     def setup_preprocessing_layer(self):
         # read features from file to define preprocessing
@@ -130,21 +129,19 @@ class TrainingTask(object):
 
         print (f'scattered {name_prefix} plot for {epoch}th epoch saved.') 
 
-
 class AutoEncoderTask(TrainingTask):
     def __init__(self, args, traj_obj,  histogram_feature_mapper=None, output_feature_mapper=None):
         super(AutoEncoderTask, self).__init__(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
         self.model_name = 'autoencoder'
 
-    def setup_model(self) :
-
         self.setup_preprocessing_layer()
+
         # output dimension of the map 
         feature_dim = self.preprocessing_layer.feature_dim
-
         # sizes of feedforward neural networks
         e_layer_dims = [feature_dim] + self.args.e_layer_dims + [self.k]
         d_layer_dims = [self.k] + self.args.d_layer_dims + [feature_dim]
+
         # define autoencoder
         self.model = AutoEncoder(e_layer_dims, d_layer_dims, self.args.activation())
         # print the model
@@ -159,14 +156,21 @@ class AutoEncoderTask(TrainingTask):
         else:
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
 
+        #--- prepare the data ---
+        self.weights = traj_obj.weights
+        self.traj = self.preprocessing_layer(traj_obj.trajectory)
+
+        # print information of trajectory
+        print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
+
     def colvar_model(self):
         return AEColVar(self.preprocessing_layer, self.model.encoder)
 
-    def loss_func(self, X):
+    def weighted_MSE_loss(self, X, weight):
         # Forward pass to get output
         out = self.model(X)
         # Evaluate loss
-        return torch.nn.MSELoss(out, X)
+        return (weight * (out-X)**2).mean()
 
     def cv_on_data(self, X):
         return self.model.encoder(X)
@@ -174,27 +178,15 @@ class AutoEncoderTask(TrainingTask):
     def train(self):
         """Function to train the model
         """
-        #--- prepare the data ---
-        weights = self.traj_obj.traj_weights
-        traj = self.preprocessing_layer(self.traj_obj.traj)
-
-        # print information of trajectory
-        print ( '\nshape of trajectory data array:\n {}'.format(traj.shape) )
-
         # split the dataset into a training set (and its associated weights) and a test set
-        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(traj, weights, torch.arange(self.traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
-        # intialization of the methods to sample with replacement from the data points (needed since weights are present)
-        train_sampler = torch.utils.data.WeightedRandomSampler(w_train, len(w_train))
-        test_sampler  = torch.utils.data.WeightedRandomSampler(w_test, len(w_test))
+        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(self.traj, self.weights, torch.arange(self.traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
         # method to construct data batches and iterate over them
-        train_loader = torch.utils.data.DataLoader(dataset = torch.utils.data.TensorDataset(X_train, index_train),
+        train_loader = torch.utils.data.DataLoader(dataset = torch.utils.data.TensorDataset(X_train, w_train, index_train),
                                                    batch_size=self.batch_size,
-                                                   shuffle=False,
-                                                   sampler=train_sampler)
-        test_loader  = torch.utils.data.DataLoader(dataset= torch.utils.data.TensorDataset(X_test, index_test),
+                                                   shuffle=False)
+        test_loader  = torch.utils.data.DataLoader(dataset= torch.utils.data.TensorDataset(X_test, w_test, index_test),
                                                    batch_size=self.batch_size,
-                                                   shuffle=False,
-                                                   sampler=test_sampler)
+                                                   shuffle=False)
         
         # --- start the training over the required number of epochs ---
         self.loss_list = []
@@ -203,11 +195,11 @@ class AutoEncoderTask(TrainingTask):
             # Train the model by going through the whole dataset
             self.model.train()
             train_loss = []
-            for iteration, [X, index] in enumerate(train_loader):
+            for iteration, [X, weight, index] in enumerate(train_loader):
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
                 # Evaluate loss
-                loss = self.loss_func(X)
+                loss = self.weighted_MSE_loss(X, weight)
                 # Get gradient with respect to parameters of the model
                 loss.backward()
                 # Store loss
@@ -219,8 +211,8 @@ class AutoEncoderTask(TrainingTask):
             with torch.no_grad():
                 # Evaluation of test loss
                 test_loss = []
-                for iteration, [X, index] in enumerate(test_loader):
-                    loss = loss_func(X)
+                for iteration, [X, weight, index] in enumerate(test_loader):
+                    loss = self.weighted_MSE_loss(X, weight)
                     # Store loss
                     test_loss.append(loss)
                 self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
@@ -248,19 +240,20 @@ class EigenFunctionTask(TrainingTask):
         self.diag_coeff = torch.ones(self.tot_dim).double() * args.diffusion_coeff * 1e7 * self.beta
         self.sort_eigvals_in_training = args.sort_eigvals_in_training
         self.eig_w = args.eig_w
+
         self.v_in_jac = torch.ones(self.batch_size, dtype=torch.float64)
-        # list of (i,j) pairs
+
+        # list of (i,j) pairs in the penalty term
         #self.ij_list = list(itertools.combinations_with_replacement(range(Param.k), 2))
         self.ij_list = list(itertools.combinations(range(self.k), 2))
         self.num_ij_pairs = len(self.ij_list)
 
-    def setup_model(self) :
-
         self.setup_preprocessing_layer()
+
         # output dimension of the map 
         feature_dim = self.preprocessing_layer.feature_dim
-
         layer_dims = [feature_dim] + self.args.layer_dims + [1]
+
         self.model = EigenFunction(layer_dims, self.k, self.preprocessing_layer, self.args.activation())
 
         print ('\nEigenfunctions:\n', self.model)
@@ -274,13 +267,21 @@ class EigenFunctionTask(TrainingTask):
         else:
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
 
+        #--- prepare the data ---
+        self.weights = traj_obj.weights
+        self.traj = traj_obj.trajectory
+        self.tot_dim = self.traj.shape[1] * 3 
+
+        # print information of trajectory
+        print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
+
     def colvar_model(self):
         return self.model
 
     def cv_on_data(self, X):
         return self.model(X)
 
-    def loss_func(self, X, b_weights):
+    def loss_func(self, X, weight):
         # Evaluate function value on data
         y = self.model(X)
 
@@ -291,15 +292,15 @@ class EigenFunctionTask(TrainingTask):
         """
         y_grad_vec = [torch.autograd.grad(y[:,idx], X, self.v_in_jac, create_graph=True)[0] for idx in range(self.k)]
 
-        # Total weights, will be used for normalization 
-        b_tot_weights = b_weights.sum()
+        # Total weight, will be used for normalization 
+        tot_weight = weight.sum()
 
         # Mean and variance evaluated on data
-        mean_list = [(y[:,idx] * b_weights).sum() / b_tot_weights for idx in range(self.k)]
-        var_list = [(y[:,idx]**2 * b_weights).sum() / b_tot_weights - mean_list[idx]**2 for idx in range(self.k)]
+        mean_list = [(y[:,idx] * weight).sum() / tot_weight for idx in range(self.k)]
+        var_list = [(y[:,idx]**2 * weight).sum() / tot_weight - mean_list[idx]**2 for idx in range(self.k)]
 
         # Compute Rayleigh quotients as eigenvalues
-        eig_vals = torch.tensor([1.0 / (b_tot_weights * self.beta) * torch.sum((y_grad_vec[idx]**2 * self.diag_coeff).sum(dim=1) * b_weights) / var_list[idx] for idx in range(self.k)])
+        eig_vals = torch.tensor([1.0 / (tot_weight * self.beta) * torch.sum((y_grad_vec[idx]**2 * self.diag_coeff).sum(dim=1) * weight) / var_list[idx] for idx in range(self.k)])
 
         cvec = range(self.k)
         if self.sort_eigvals_in_training :
@@ -307,7 +308,7 @@ class EigenFunctionTask(TrainingTask):
             # Sort the eigenvalues 
             eig_vals = eig_vals[cvec]
 
-        non_penalty_loss = 1.0 / (b_tot_weights * self.beta) * sum([self.eig_w[idx] * torch.sum((y_grad_vec[cvec[idx]]**2 * self.diag_coeff).sum(dim=1) * b_weights) / var_list[cvec[idx]] for idx in range(self.k)])
+        non_penalty_loss = 1.0 / (tot_weight * self.beta) * sum([self.eig_w[idx] * torch.sum((y_grad_vec[cvec[idx]]**2 * self.diag_coeff).sum(dim=1) * weight) / var_list[cvec[idx]] for idx in range(self.k)])
 
         penalty = torch.zeros(1, requires_grad=True).double()
 
@@ -317,7 +318,7 @@ class EigenFunctionTask(TrainingTask):
         for idx in range(self.num_ij_pairs):
           ij = self.ij_list[idx]
           # Sum of squares of covariance between two different eigenfunctions
-          penalty += ((y[:, ij[0]] * y[:, ij[1]] * b_weights).sum() / b_tot_weights - mean_list[ij[0]] * mean_list[ij[1]])**2
+          penalty += ((y[:, ij[0]] * y[:, ij[1]] * weight).sum() / tot_weight - mean_list[ij[0]] * mean_list[ij[1]])**2
 
         loss = 1.0 * non_penalty_loss + self.alpha * penalty 
 
@@ -326,27 +327,15 @@ class EigenFunctionTask(TrainingTask):
     def train(self):
         """Function to train the model
         """
-        #--- prepare the data ---
-        weights = self.traj_obj.traj_weights
-        traj = self.traj_obj.traj
-
-        # print information of trajectory
-        print ( '\nshape of trajectory data array:\n {}'.format(traj.shape) )
-
         # split the dataset into a training set (and its associated weights) and a test set
-        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(traj, weights, torch.arange(traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
-        # intialization of the methods to sample with replacement from the data points (needed since weights are present)
-        train_sampler = torch.utils.data.WeightedRandomSampler(w_train, len(w_train))
-        test_sampler  = torch.utils.data.WeightedRandomSampler(w_test, len(w_test))
+        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(self.traj, self.weights, torch.arange(self.traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
         # method to construct data batches and iterate over them
-        train_loader = torch.utils.data.DataLoader(dataset = torch.utils.data.TensorDataset(X_train, index_train),
+        train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, w_train, index_train),
                                                    batch_size=self.batch_size,
-                                                   shuffle=False,
-                                                   sampler=train_sampler)
-        test_loader  = torch.utils.data.DataLoader(dataset= torch.utils.data.TensorDataset(X_test, index_test),
+                                                   shuffle=False)
+        test_loader  = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_test, w_test, index_test),
                                                    batch_size=self.batch_size,
-                                                   shuffle=False,
-                                                   sampler=test_sampler)
+                                                   shuffle=False)
         
         # --- start the training over the required number of epochs ---
         self.loss_list = []
@@ -355,11 +344,11 @@ class EigenFunctionTask(TrainingTask):
             # Train the model by going through the whole dataset
             self.model.train()
             train_loss = []
-            for iteration, [X, index] in enumerate(train_loader):
+            for iteration, [X, weight, index] in enumerate(train_loader):
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
                 # Evaluate loss
-                loss, eig_vals, non_penalty_loss, penalty, cvec = self.loss_func(X)
+                loss, eig_vals, non_penalty_loss, penalty, cvec = self.loss_func(X, weight)
                 # Get gradient with respect to parameters of the model
                 loss.backward()
                 # Store loss
@@ -371,14 +360,21 @@ class EigenFunctionTask(TrainingTask):
             with torch.no_grad():
                 # Evaluation of test loss
                 test_loss = []
-                for iteration, [X, index] in enumerate(test_loader):
-                    loss = loss_func(X)
+                for iteration, [X, weight, index] in enumerate(test_loader):
+                    loss, eig_vals, penalty, cvec = self.loss_func(X, weight)
                     # Store loss
                     test_loss.append(loss)
+                    test_eig_vals.append(eig_vals)
+                    test_penalty.append(penalty)
+
                 self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
                 
             self.writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
             self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
+            self.writer.add_scalar('penalty', torch.mean(torch.tensor(test_penalty)), epoch)
+
+            for idx in range(self.k):
+                self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.tensor(test_eig_vals), dim=0)[idx], epoch)
 
             if self.output_features is not None :
                 self.plot_encoder_scattered_on_feature_space(X, index, epoch)
