@@ -310,10 +310,11 @@ class EigenFunction(torch.nn.Module):
     def __init__(self, layer_dims, k, preprocessing_layer, activation=torch.nn.Tanh()):
         super(EigenFunction, self).__init__()
         assert layer_dims[-1] == 1, "each eigenfunction must be one-dimensional"
+
         self.pre_layer = preprocessing_layer 
-        self.eigen_funcs = [create_sequential_nn(layer_dims, activation) for idx in range(k)]
+        self.eigen_funcs = torch.nn.ModuleList([create_sequential_nn(layer_dims, activation) for idx in range(k)])
 
     def forward(self, inp):
         xf = self.pre_layer(inp)
-        return torch.tensor([self.eigen_funcs(xf) for idx in range(k)])
+        return torch.cat([nn(xf) for nn in self.eigen_funcs], dim=1)
 

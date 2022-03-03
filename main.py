@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # +
-import cv2 as cv
 from utils import *
 import configparser
+from training_tasks import * 
 # -
 
 # +
@@ -38,19 +38,19 @@ class MyArgs(object):
 
         # encoded dimension
         if self.train_ae :
-            self.k = config['Autoencoder'].getint('encoded_dim')
-            self.e_layer_dims = [int(x) for x in config['Autoencoder'].get('encoder_hidden_layer_dims').split(',')]
-            self.d_layer_dims = [int(x) for x in config['Autoencoder'].get('decoder_hidden_layer_dims').split(',')]
-            self.activation_name = config['Autoencoder'].get('activation') 
+            self.k = config['AutoEncoder'].getint('encoded_dim')
+            self.e_layer_dims = [int(x) for x in config['AutoEncoder'].get('encoder_hidden_layer_dims').split(',')]
+            self.d_layer_dims = [int(x) for x in config['AutoEncoder'].get('decoder_hidden_layer_dims').split(',')]
+            self.activation_name = config['AutoEncoder'].get('activation') 
         else :
-            self.k = config['Eigenfunction'].getint('num_eigenfunction')
-            self.layer_dims = [int(x) for x in config['Eigenfunction'].get('hidden_layer_dims').split(',')]
-            self.activation_name = config['Eigenfunction'].get('activation') 
-            self.alpha = config['Eigenfunction'].getfloat('penalty_alpha')
+            self.k = config['EigenFunction'].getint('num_eigenfunction')
+            self.layer_dims = [int(x) for x in config['EigenFunction'].get('hidden_layer_dims').split(',')]
+            self.activation_name = config['EigenFunction'].get('activation') 
+            self.alpha = config['EigenFunction'].getfloat('penalty_alpha')
             self.eig_w = [float(x) for x in config['EigenFunction'].get('eig_w').split(',')]
-            self.beta = config['Eigenfunction'].getfloat('beta')
-            self.diffusion_coeff = config['Eigenfunction'].getfloat('diffusion_coeff')
-            self.sort_eigvals_in_training = config['Eigenfunction'].getboolean('sort_eigvals_in_training')
+            self.beta = config['EigenFunction'].getfloat('beta')
+            self.diffusion_coeff = config['EigenFunction'].getfloat('diffusion_coeff')
+            self.sort_eigvals_in_training = config['EigenFunction'].getboolean('sort_eigvals_in_training')
 
         self.activation = getattr(torch.nn, self.activation_name) 
 
@@ -93,7 +93,7 @@ def main():
 
     if len(feature_list) == 2 : # use it only if it is 2D
         output_feature_mapper = FeatureMap(feature_list, use_angle_value=True)
-        output_feature_mapper.info('2d feature List for output:\n')
+        output_feature_mapper.info('\n2d feature List for output:\n')
     else :
         print (f'\nOutput feature mapper set to None, since 2d feature required for output, but {len(feature_list)} are provided.')
         output_feature_mapper = None
