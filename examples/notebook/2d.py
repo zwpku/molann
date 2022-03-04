@@ -12,6 +12,7 @@ from tqdm import tqdm
 import os
 import time
 from tensorboardX import SummaryWriter
+import cv2 as cv
 
 # ## Part 1: define necessary functions and classes.
 
@@ -448,7 +449,7 @@ def UnbiasedTraj(pot, X_0, delta_t=1e-3, T=1000, save=1, save_energy=False, seed
     return np.array(traj), np.array(Pot_values)
 
 
-# We now define the neural network classes and useful functions for the training.
+# ### Task 1: train Autoencoder
 
 # +
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
@@ -459,6 +460,135 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
     return torch.nn.Sequential(*layers).double()
 
+class AutoEncoder(torch.nn.Module):
+    def __init__(self, e_layer_dims, d_layer_dims, activation=torch.nn.Tanh()):
+        super(AutoEncoder, self).__init__()
+        self.encoder = create_sequential_nn(e_layer_dims, activation)
+        self.decoder = create_sequential_nn(d_layer_dims, activation)
+
+    def forward(self, inp):
+        return self.decoder(self.encoder(inp))
+
+class AutoEncoderTask(object):
+    def __init__(self, args, trajectory, model_path):
+        self.learning_rate = args.learning_rate
+        self.num_epochs= args.num_epochs
+        self.batch_size = args.batch_size 
+        self.test_ratio = args.test_ratio
+        self.k = args.k
+        self.model_path = model_path
+        self.writer = SummaryWriter(model_path)
+        
+        #--- prepare the data ---
+        self.traj = torch.from_numpy(trajectory).double() 
+        self.weights = torch.ones(self.traj.shape[0])
+
+        # print information of trajectory
+        print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
+
+        self.input_dim = self.traj.shape[1]  
+
+        # output dimension of the map 
+        e_layer_dims = [self.input_dim] + args.e_layer_dims + [self.k]
+        d_layer_dims = [self.k] + args.d_layer_dims + [self.input_dim]
+        
+        self.model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
+        # print the model
+        print ('\nAutoencoder: input dim: {}, encoded dim: {}\n'.format(self.input_dim, self.k), self.model)
+        
+        if args.optimizer == 'Adam':
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        else:
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
+       
+    def weighted_MSE_loss(self, X, weight):
+        # Forward pass to get output
+        out = self.model(X)
+        # Evaluate loss
+        return (weight * torch.sum((out-X)**2, dim=1)).sum() / weight.sum()
+
+    def plot_encoder(self, epoch):
+        gridx = np.linspace(x_domain[0], x_domain[1], 100)
+        gridy = np.linspace(y_domain[0], y_domain[1], 100)
+        x_plot = np.outer(gridx, np.ones(100)) 
+        y_plot = np.outer(gridy, np.ones(100)).T 
+
+        x2d = torch.from_numpy(np.concatenate((x_plot.reshape(100 * 100, 1), y_plot.reshape(100 * 100, 1)), axis=1))
+        encoder_on_grid = self.model.encoder(x2d).detach()
+        
+        for idx in range(self.k):
+            encoder = encoder_on_grid[:,idx].reshape(100,100)
+            print ( "min and max values of %dth dimension of encoder: (%.4f, %.4f)" % (idx, encoder.min(), encoder.max()) )
+
+            fig, ax = plt.subplots()
+            ax.pcolormesh(x_plot, y_plot, encoder, cmap='coolwarm',shading='auto')
+
+            fig_name = f"{self.model_path}/encoder_{idx}_{epoch}.jpg"
+            fig.savefig(fig_name)
+            print ( "encoder profiles saved to file: %s" % fig_name )
+            plt.close()
+            self.writer.add_image(f'{idx}th dimension of encoder', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), global_step=epoch, dataformats='HWC')
+    
+    # the training function  
+    def train(self):
+        """Function to train the model
+        """
+        # split the dataset into a training set (and its associated weights) and a test set
+        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(self.traj, self.weights, torch.arange(self.traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
+
+        # method to construct data batches and iterate over them
+        train_loader = torch.utils.data.DataLoader(dataset = torch.utils.data.TensorDataset(X_train, w_train, index_train),
+                                                   batch_size=self.batch_size,
+                                                   drop_last=True,
+                                                   shuffle=False)
+        test_loader  = torch.utils.data.DataLoader(dataset= torch.utils.data.TensorDataset(X_test, w_test, index_test),
+                                                   batch_size=self.batch_size,
+                                                   drop_last=True,
+                                                   shuffle=False)
+        
+        # --- start the training over the required number of epochs ---
+        self.loss_list = []
+        print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
+        for epoch in tqdm(range(self.num_epochs)):
+            # Train the model by going through the whole dataset
+            self.model.train()
+            train_loss = []
+            for iteration, [X, weight, index] in enumerate(train_loader):
+                # Clear gradients w.r.t. parameters
+                self.optimizer.zero_grad()
+                # Evaluate loss
+                loss = self.weighted_MSE_loss(X, weight)
+                # Get gradient with respect to parameters of the model
+                loss.backward()
+                # Store loss
+                train_loss.append(loss)
+                # Updating parameters
+                self.optimizer.step()
+            # Evaluate the test loss on the test dataset
+            self.model.eval()
+            with torch.no_grad():
+                # Evaluation of test loss
+                test_loss = []
+                for iteration, [X, weight, index] in enumerate(test_loader):
+                    loss = self.weighted_MSE_loss(X, weight)
+                    # Store loss
+                    test_loss.append(loss)
+                self.loss_list.append([torch.tensor(train_loss), torch.tensor(test_loss)])
+                
+            self.writer.add_scalar('Loss/train', torch.mean(torch.tensor(train_loss)), epoch)
+            self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
+
+            self.plot_encoder(epoch)
+
+        print ("training ends.\n") 
+
+
+
+# -
+
+# ### Task 2: train eigenfunction
+
+# +
 class EigenFunction(nn.Module):
     def __init__(self, layer_dims, k, activation=torch.nn.Tanh()):
         super(EigenFunction, self).__init__()       
@@ -467,34 +597,19 @@ class EigenFunction(nn.Module):
 
     def forward(self, inp):
         return torch.cat([nn(inp) for nn in self.eigen_funcs], dim=1)
-        
-
-def xi_ae(model,  x):
-    """Collective variable defined through an auto encoder model
-
-    :param model: Neural network model build with PyTorch
-    :param x: np.array, position, ndim = 2, shape = (1,1)
-
-    :return: xi: np.array
-    """
-    model.eval()
-    if torch.is_tensor(x) == False :
-        x = torch.from_numpy(x).float()
-    return model.encoder(x).detach().numpy()
 
 class EigenFunctionTask(object):
-    def __init__(self, args, traj_obj):
+    def __init__(self, args, trajectory, model_path):
         self.learning_rate = args.learning_rate
         self.num_epochs= args.num_epochs
         self.batch_size = args.batch_size 
         self.test_ratio = args.test_ratio
-        self.traj_obj = traj_obj
-        self.args = args
         self.k = args.k
+        self.model_path = model_path
+        self.writer = SummaryWriter(model_path)
 
-        self.model_name = 'eigenfunction'
         self.alpha = args.alpha
-        self.beta = args.beta
+        self.beta = beta
         self.sort_eigvals_in_training = args.sort_eigvals_in_training
         self.eig_w = args.eig_w
 
@@ -504,7 +619,7 @@ class EigenFunctionTask(object):
         self.num_ij_pairs = len(self.ij_list)
 
         #--- prepare the data ---
-        self.traj = torch.from_numpy(traj_obj).double() 
+        self.traj = torch.from_numpy(trajectory).double() 
         # we will compute spatial gradients
         self.traj.requires_grad_()
         self.weights = torch.ones(self.traj.shape[0])
@@ -512,27 +627,22 @@ class EigenFunctionTask(object):
         # print information of trajectory
         print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
 
-        self.tot_dim = self.traj.shape[1]  
+        self.input_dim = self.traj.shape[1]  
         # diagnoal matrix 
         # the unit of eigenvalues given by Rayleigh quotients is ns^{-1}.
-        self.diag_coeff = torch.ones(self.tot_dim).double() 
+        self.diag_coeff = torch.ones(self.input_dim).double() 
 
         # output dimension of the map 
-        layer_dims = [self.tot_dim] + self.args.layer_dims + [1]
-        self.model = EigenFunction(layer_dims, self.k, self.args.activation())
+        layer_dims = [self.input_dim] + args.layer_dims + [1]
+        self.model = EigenFunction(layer_dims, self.k, args.activation())
 
         print ('\nEigenfunctions:\n', self.model)
 
-        if self.args.optimizer == 'Adam':
+        if args.optimizer == 'Adam':
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         else:
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
 
-        # path to store log data
-        prefix = f"{args.pot_name}-" 
-        self.model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
-        print ('\nLog directory: {}\n'.format(self.model_path))
-        self.writer = SummaryWriter(self.model_path)
         
     def loss_func(self, X, weight):
         # Evaluate function value on data
@@ -545,7 +655,7 @@ class EigenFunctionTask(object):
         """
         y_grad_vec = [torch.autograd.grad(outputs=y[:,idx].sum(), inputs=X, retain_graph=True, create_graph=True)[0] for idx in range(self.k)]
 
-        y_grad_vec = [y_grad.reshape((-1, self.tot_dim)) for y_grad in y_grad_vec]
+        y_grad_vec = [y_grad.reshape((-1, self.input_dim)) for y_grad in y_grad_vec]
 
         # Total weight, will be used for normalization 
         tot_weight = weight.sum()
@@ -578,6 +688,28 @@ class EigenFunctionTask(object):
         loss = 1.0 * non_penalty_loss + self.alpha * penalty 
         
         return loss, eig_vals, non_penalty_loss, penalty, cvec
+    
+    def plot_eigenfunc(self, epoch):
+        gridx = np.linspace(x_domain[0], x_domain[1], 100)
+        gridy = np.linspace(y_domain[0], y_domain[1], 100)
+        x_plot = np.outer(gridx, np.ones(100)) 
+        y_plot = np.outer(gridy, np.ones(100)).T 
+
+        x2d = torch.from_numpy(np.concatenate((x_plot.reshape(100 * 100, 1), y_plot.reshape(100 * 100, 1)), axis=1))
+        eigenfuncs_on_grid = self.model(x2d).detach()
+        
+        for idx in range(self.k):
+            eigenfunc = eigenfuncs_on_grid[:,idx].reshape(100,100)
+            print ( "min and max values of %dth eigenfunc: (%.4f, %.4f)" % (idx, eigenfunc.min(), eigenfunc.max()) )
+
+            fig, ax = plt.subplots()
+            ax.pcolormesh(x_plot, y_plot, eigenfunc, cmap='coolwarm',shading='auto')
+
+            fig_name = f"{self.model_path}/eigenfunc_{idx}_{epoch}.jpg"
+            fig.savefig(fig_name)
+            print ( "%d eigenfunction profile saved to file: %s" % (idx, fig_name) )
+            plt.close()
+            self.writer.add_image(f'{idx}th eigenfunction', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), global_step=epoch, dataformats='HWC')
 
     def train(self):
         """Function to train the model
@@ -602,7 +734,7 @@ class EigenFunctionTask(object):
             # Train the model by going through the whole dataset
             self.model.train()
             train_loss = []
-            for iteration, [X, weight, index] in tqdm(enumerate(train_loader)):
+            for iteration, [X, weight, index] in enumerate(train_loader):
                 X.requires_grad_()
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
@@ -638,7 +770,7 @@ class EigenFunctionTask(object):
             for idx in range(self.k):
                 self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.stack(test_eig_vals)[:,idx]), epoch)
 
-            self.plot_eigenfunc(X, index, epoch)
+            self.plot_eigenfunc(epoch)
 
         print ("training ends.\n") 
 
@@ -658,7 +790,7 @@ def set_all_seeds(seed):
     
 class MyArgs(object):
 
-    def __init__(self, pot_name):
+    def __init__(self, pot_name, train_autoencoder=True):
 
         #set training parameters
         self.use_gpu = False
@@ -671,13 +803,16 @@ class MyArgs(object):
         self.pot_name = pot_name
 
         self.k = 2 
-        self.layer_dims = [20, 20, 20] 
         self.activation_name = 'Tanh'  
-        self.alpha = 20.0 
-        self.eig_w = [1.0, 0.6] 
-        self.beta = 1.0 
-        self.diffusion_coeff = 1e-5 
-        self.sort_eigvals_in_training = True 
+        if train_autoencoder :
+            self.e_layer_dims = [20, 20, 20] 
+            self.d_layer_dims = [20, 20, 20] 
+        else :
+            self.layer_dims = [20, 20, 20] 
+            self.alpha = 20.0 
+            self.eig_w = [1.0, 0.6] 
+            self.diffusion_coeff = 1e-5 
+            self.sort_eigvals_in_training = True 
 
         self.activation = getattr(torch.nn, self.activation_name) 
 
@@ -698,29 +833,20 @@ pot_list = [ TripleWellPotential, TripleWellOneChannelPotential, DoubleWellPoten
 # choose a potential in the pot_list above
 pot_id = 4
 eps = 0.1
+beta = 1.0 
 
 # for data generation
 delta_t = 0.001
 T = 100000
 save = 10
 
-# for training
-args = MyArgs(pot_list[pot_id].__name__)
-
-save_fig_to_file = False
-
-# -
-
-# First, we visualise our different potentials.
-
-# +
 # x and y domains for each potential
 x_domains = [[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5], [-3.5, 3.5], [-2.5, 2.5], [-2, 2], [-1.5, 1.5], [-1.5, 1.5] ]
 y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-2.5, 2.5], [-2.0, 1.5], [-1.5, 1.5], [-1.5, 1.5] ]
 x0_list = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1] ]
 v_min_max = [[-4,3], [-4,3], [-4,7], [0.3,8], [0,5], [0,5], [0,5], [0,5] ]
 
-pot = pot_list[pot_id](args.beta, eps)
+pot = pot_list[pot_id](beta, eps)
 x_domain = x_domains[pot_id] 
 y_domain = y_domains[pot_id] 
 
@@ -728,6 +854,27 @@ pot_name = type(pot).__name__
 
 print ('potential name: %s' % pot_name) 
 
+save_fig_to_file = False
+
+train_autoencoder = False
+
+args = MyArgs(pot_name, train_autoencoder)
+
+if train_autoencoder:
+    cv_name = 'autoencoder'
+else:
+    cv_name = 'eigenfunction'
+        
+# path to store log data
+prefix = f"{cv_name}-{pot_name}-" 
+model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+print ('\nLog directory: {}\n'.format(model_path))
+
+# -
+
+# First, we visualise our different potentials.
+
+# +
 gridx = np.linspace(x_domain[0], x_domain[1], 100)
 gridy = np.linspace(y_domain[0], y_domain[1], 100)
 x_plot = np.outer(gridx, np.ones(100)) 
@@ -746,7 +893,7 @@ ax0.plot_surface(x_plot, y_plot, pot_on_grid , cmap='coolwarm', edgecolor='none'
 ax1.pcolormesh(x_plot, y_plot, pot_on_grid, cmap='coolwarm',shading='auto', vmin=v_min_max[pot_id][0], vmax=v_min_max[pot_id][1])
 
 if save_fig_to_file :
-    filename = "%s.jpg" % pot_name
+    filename = f"{model_path}/{pot_name}.jpg" 
     fig.savefig(filename)
     print ( "potential profiles saved to file: %s" % filename )
 
@@ -771,18 +918,18 @@ ax0.scatter(trajectory[:,0], trajectory[:,1], marker='x')
 ax1.plot(range(len(trajectory[:,0])), trajectory[:,0], label='x coodinate along trajectory')
 
 if save_fig_to_file :
-    traj_filename = "traj_%s.jpg" % pot_name
+    traj_filename = f"{model_path}/traj_{pot_name}.jpg" 
     fig.savefig(traj_filename)
     print ("trajectory plot saved to file: %s" % traj_filename)
 
 
 # +
-train_obj = EigenFunctionTask(args, trajectory)
-
+if train_autoencoder:
+    train_obj = AutoEncoderTask(args, trajectory, model_path)
+else:
+    train_obj = EigenFunctionTask(args, trajectory, model_path)
+    
 # train autoencoder
 train_obj.train()
 # -
-
-
-
 
