@@ -287,13 +287,13 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
 
     return torch.nn.Sequential(*layers).double()
 
-class AEColVar(torch.nn.Module):
-    def __init__(self, preprocessing_layer, encoder):
-        super(AEColVar, self).__init__()
+class ColVar(torch.nn.Module):
+    def __init__(self, preprocessing_layer, layer):
+        super(ColVar, self).__init__()
         self.preprocessing_layer = preprocessing_layer
-        self.encoder = encoder
+        self.layer = layer
     def forward(self, inp):
-        return self.encoder(self.preprocessing_layer(inp))
+        return self.layer(self.preprocessing_layer(inp))
 
 # autoencoder class 
 class AutoEncoder(torch.nn.Module):
@@ -307,14 +307,12 @@ class AutoEncoder(torch.nn.Module):
 
 # eigenfunction class
 class EigenFunction(torch.nn.Module):
-    def __init__(self, layer_dims, k, preprocessing_layer, activation=torch.nn.Tanh()):
+    def __init__(self, layer_dims, k, activation=torch.nn.Tanh()):
         super(EigenFunction, self).__init__()
         assert layer_dims[-1] == 1, "each eigenfunction must be one-dimensional"
 
-        self.pre_layer = preprocessing_layer 
         self.eigen_funcs = torch.nn.ModuleList([create_sequential_nn(layer_dims, activation) for idx in range(k)])
 
     def forward(self, inp):
-        xf = self.pre_layer(inp)
-        return torch.cat([nn(xf) for nn in self.eigen_funcs], dim=1)
+        return torch.cat([nn(inp) for nn in self.eigen_funcs], dim=1)
 

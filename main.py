@@ -99,10 +99,15 @@ def main():
         output_feature_mapper = None
 
     if args.train_ae :
+        # path to store log data
+        prefix = f"{args.sys_name}-autoencoder-" 
+        model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
         # define training task
-        train_obj = AutoEncoderTask(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
+        train_obj = AutoEncoderTask(args, traj_obj, model_path, histogram_feature_mapper, output_feature_mapper)
     else :
-        train_obj = EigenFunctionTask(args, traj_obj, histogram_feature_mapper, output_feature_mapper)
+        prefix = f"{args.sys_name}-eigenfunction-" 
+        model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+        train_obj = EigenFunctionTask(args, traj_obj, model_path, histogram_feature_mapper, output_feature_mapper)
 
     # train autoencoder
     train_obj.train()
