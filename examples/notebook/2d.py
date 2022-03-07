@@ -15,102 +15,6 @@ import time
 from tensorboardX import SummaryWriter
 import cv2 as cv
 
-# ### First, define all parameters  
-
-# +
-def set_all_seeds(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        np.random.seed(seed)
-    random.seed(seed)
-    
-class MyArgs(object):
-
-    def __init__(self, pot_name, train_autoencoder=True):
-
-        #set training parameters
-        self.use_gpu = False
-        self.batch_size = 5000 
-        self.num_epochs = 50 
-        self.test_ratio = 0.2
-        self.learning_rate = 0.005 
-        self.optimizer = 'Adam' # 'SGD'
-        self.model_save_dir = 'checkpoint'  
-        self.pot_name = pot_name
-
-        self.k = 3 # dimension of autoencoder, or number of eigenfunctions
-        self.activation_name = 'Tanh'  
-        if train_autoencoder :
-            self.e_layer_dims = [20, 20, 20] 
-            self.d_layer_dims = [20, 20, 20] 
-        else :
-            self.layer_dims = [20, 20, 20] 
-            self.alpha = 20.0 
-            self.eig_w = [1.0, 0.8, 0.6] 
-            self.diffusion_coeff = 1e-5 
-            self.sort_eigvals_in_training = True 
-
-        self.activation = getattr(torch.nn, self.activation_name) 
-
-        self.seed = 30 
-
-        if self.seed:
-            set_all_seeds(self.seed)
-
-        # CUDA support
-        if torch.cuda.is_available() and self.use_gpu:
-            self.device = torch.device('cuda')
-        else:
-            self.device = torch.device('cpu')
-
-# The names correspond to functions in the next cell.
-pot_list = [ TripleWellPotential, TripleWellOneChannelPotential, DoubleWellPotential, ZPotential, \
-                TripleWellPotAlongCircle, StiffPot, UniformPotAlongCircle, DoubleWellPotAlongCircle ] 
-
-# choose a potential in the pot_list above
-pot_id = 4
-
-eps = 0.5
-beta = 1.0 
-
-# for data generation
-delta_t = 0.001
-N = 1000000
-save = 10
-
-# x and y domains for each potential
-x_domains = [[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2, 2], [-1.5, 1.5], [-1.5, 1.5] ]
-y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2.0, 1.5], [-1.5, 1.5], [-1.5, 1.5] ]
-x0_list = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1] ]
-v_min_max = [[-4,3], [-4,3], [-4,7], [0.3,8], [0,10], [0,5], [0,5], [0,5] ]
-
-pot = pot_list[pot_id](beta, eps)
-x_domain = x_domains[pot_id] 
-y_domain = y_domains[pot_id] 
-
-pot_name = type(pot).__name__
-
-print ('potential name: %s' % pot_name) 
-
-save_fig_to_file = False
-
-train_autoencoder = False
-
-args = MyArgs(pot_name, train_autoencoder)
-
-if train_autoencoder:
-    cv_name = 'autoencoder'
-else:
-    cv_name = 'eigenfunction'
-        
-# path to store log data
-prefix = f"{cv_name}-{pot_name}-" 
-model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
-print ('\nLog directory: {}\n'.format(model_path))
-
-# -
-
 # ###  defines all potentials classes
 
 # +
@@ -495,11 +399,115 @@ class DoubleWellPotAlongCircle :
     def nabla_V(self, x): 
         return np.column_stack( (4.0 * x[:,0] / self.eps * (x[:,0]**2 + x[:,1]**2 - 1), 4.0 * x[:,1] + 4.0 * x[:,1] / self.eps * (x[:,0]**2 + x[:,1]**2 - 1)) )
 
+
+# -
+
+# ### define parameters
+
+# +
+def set_all_seeds(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+    random.seed(seed)
+    
+class MyArgs(object):
+
+    def __init__(self, pot_name, train_autoencoder=True):
+
+        #set training parameters
+        self.use_gpu = False
+        self.batch_size = 1000
+        self.num_epochs = 50 
+        self.test_ratio = 0.2
+        self.learning_rate = 0.005 
+        self.optimizer = 'Adam' # 'SGD'
+        self.model_save_dir = 'checkpoint'  
+        self.pot_name = pot_name
+
+        self.k = 2 # dimension of autoencoder, or number of eigenfunctions
+        self.activation_name = 'Tanh'  
+        if train_autoencoder :
+            self.e_layer_dims = [20, 20, 20] 
+            self.d_layer_dims = [20, 20, 20] 
+        else :
+            self.layer_dims = [20, 20, 20] 
+            self.alpha = 20.0 
+            self.eig_w = [1.0, 0.8, 0.6] 
+            self.diffusion_coeff = 1e-5 
+            self.sort_eigvals_in_training = True 
+
+        self.activation = getattr(torch.nn, self.activation_name) 
+
+        self.seed = 30 
+
+        if self.seed:
+            set_all_seeds(self.seed)
+
+        # CUDA support
+        if torch.cuda.is_available() and self.use_gpu:
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+
+
+
+# -
+
+# ### continue to define parameters
+
+# +
+# x and y domains for each potential
+x_domains = [[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2, 2], [-1.5, 1.5], [-1.5, 1.5] ]
+y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2.0, 1.5], [-1.5, 1.5], [-1.5, 1.5] ]
+x0_list = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1] ]
+v_min_max = [[-4,3], [-4,3], [-4,7], [0.3,8], [0,10], [0,5], [0,5], [0,5] ]
+
+# The names correspond to classes above.
+pot_list = [ TripleWellPotential, TripleWellOneChannelPotential, DoubleWellPotential, ZPotential, \
+        TripleWellPotAlongCircle, StiffPot, UniformPotAlongCircle, DoubleWellPotAlongCircle ] 
+
+# choose a potential in the pot_list above
+pot_id = 4
+
+eps = 0.5
+beta = 1.0 
+pot = pot_list[pot_id](beta, eps)
+pot_name = type(pot).__name__
+
+print ('potential name: %s' % pot_name) 
+
+x_domain = x_domains[pot_id] 
+y_domain = y_domains[pot_id] 
+
+# for data generation
+delta_t = 0.001
+N = 10000000
+save = 10
+
+save_fig_to_file = False
+
+train_autoencoder = True #False
+
+args = MyArgs(pot_name, train_autoencoder)
+
+if train_autoencoder:
+    cv_name = 'autoencoder'
+else:
+    cv_name = 'eigenfunction'
+        
+# path to store log data
+prefix = f"{cv_name}-{pot_name}-" 
+model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+print ('\nLog directory: {}\n'.format(model_path))
+
 # -
 
 # ### we visualise the potential
 
 # +
+
 nx = 100
 ny = 150
 dx = (x_domain[1] - x_domain[0]) / nx
@@ -565,6 +573,7 @@ def UnbiasedTraj(pot, X_0, delta_t=1e-3, N=1000, save=1, save_energy=False, seed
                 Pot_values.append(pot.V(X)[0])
     return np.array(traj), np.array(Pot_values)
 
+
 x_0 = np.array(x0_list[pot_id])
 
 ### Generate the trajectory
@@ -593,12 +602,6 @@ if save_fig_to_file :
 
 # -
 
-# ### define two training tasks 
-#
-# #### task 1: train autoencoder  
-
-# +
-
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers = []
     for i in range(len(layer_dims)-2) :
@@ -607,6 +610,12 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
     return torch.nn.Sequential(*layers).double()
 
+
+# ### define two training tasks 
+#
+# #### task 1: train autoencoder  
+
+# +
 class AutoEncoder(torch.nn.Module):
     def __init__(self, e_layer_dims, d_layer_dims, activation=torch.nn.Tanh()):
         super(AutoEncoder, self).__init__()
@@ -697,7 +706,10 @@ class AutoEncoderTask(object):
         
         # --- start the training over the required number of epochs ---
         self.loss_list = []
+        
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
+        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs))
+        
         for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset
             self.model.train()
@@ -730,7 +742,6 @@ class AutoEncoderTask(object):
             self.plot_encoder(epoch)
 
         print ("training ends.\n") 
-
 
 
 # -
@@ -881,12 +892,15 @@ class EigenFunctionTask(object):
         
         # --- start the training over the required number of epochs ---
         self.loss_list = []
+        
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
+        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs))
+        
         for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset
             self.model.train()
             train_loss = []
-            for iteration, [X, weight, index] in enumerate(train_loader):
+            for iteration, [X, weight, index] in tqdm(enumerate(train_loader)):
                 X.requires_grad_()
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
