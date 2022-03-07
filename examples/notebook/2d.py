@@ -2,6 +2,7 @@
 import numpy as np
 from scipy import integrate
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import torch
 import math 
 import torch.nn as nn
@@ -14,9 +15,103 @@ import time
 from tensorboardX import SummaryWriter
 import cv2 as cv
 
-# ## Part 1: define necessary functions and classes.
+# ### First, define all parameters  
 
-# The follow cell defines all our potentials classes.
+# +
+def set_all_seeds(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+    random.seed(seed)
+    
+class MyArgs(object):
+
+    def __init__(self, pot_name, train_autoencoder=True):
+
+        #set training parameters
+        self.use_gpu = False
+        self.batch_size = 5000 
+        self.num_epochs = 50 
+        self.test_ratio = 0.2
+        self.learning_rate = 0.005 
+        self.optimizer = 'Adam' # 'SGD'
+        self.model_save_dir = 'checkpoint'  
+        self.pot_name = pot_name
+
+        self.k = 3 # dimension of autoencoder, or number of eigenfunctions
+        self.activation_name = 'Tanh'  
+        if train_autoencoder :
+            self.e_layer_dims = [20, 20, 20] 
+            self.d_layer_dims = [20, 20, 20] 
+        else :
+            self.layer_dims = [20, 20, 20] 
+            self.alpha = 20.0 
+            self.eig_w = [1.0, 0.8, 0.6] 
+            self.diffusion_coeff = 1e-5 
+            self.sort_eigvals_in_training = True 
+
+        self.activation = getattr(torch.nn, self.activation_name) 
+
+        self.seed = 30 
+
+        if self.seed:
+            set_all_seeds(self.seed)
+
+        # CUDA support
+        if torch.cuda.is_available() and self.use_gpu:
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+
+# The names correspond to functions in the next cell.
+pot_list = [ TripleWellPotential, TripleWellOneChannelPotential, DoubleWellPotential, ZPotential, \
+                TripleWellPotAlongCircle, StiffPot, UniformPotAlongCircle, DoubleWellPotAlongCircle ] 
+
+# choose a potential in the pot_list above
+pot_id = 4
+
+eps = 0.5
+beta = 1.0 
+
+# for data generation
+delta_t = 0.001
+N = 1000000
+save = 10
+
+# x and y domains for each potential
+x_domains = [[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2, 2], [-1.5, 1.5], [-1.5, 1.5] ]
+y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2.0, 1.5], [-1.5, 1.5], [-1.5, 1.5] ]
+x0_list = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1] ]
+v_min_max = [[-4,3], [-4,3], [-4,7], [0.3,8], [0,10], [0,5], [0,5], [0,5] ]
+
+pot = pot_list[pot_id](beta, eps)
+x_domain = x_domains[pot_id] 
+y_domain = y_domains[pot_id] 
+
+pot_name = type(pot).__name__
+
+print ('potential name: %s' % pot_name) 
+
+save_fig_to_file = False
+
+train_autoencoder = False
+
+args = MyArgs(pot_name, train_autoencoder)
+
+if train_autoencoder:
+    cv_name = 'autoencoder'
+else:
+    cv_name = 'eigenfunction'
+        
+# path to store log data
+prefix = f"{cv_name}-{pot_name}-" 
+model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+print ('\nLog directory: {}\n'.format(model_path))
+
+# -
+
+# ###  defines all potentials classes
 
 # +
 def g(a):
@@ -297,13 +392,7 @@ class ZPotential:
         return np.column_stack( (self.dV_x(X[:,0], X[:,1]), self.dV_y(X[:,0], X[:,1])) )
         
 class TripleWellPotAlongCircle :
-    """Class to gather methods related to the potential function"""
     def __init__(self, beta, eps):
-        """Initialise potential function class
-
-        :param beta: float,  inverse temperature = 1 / (k_B * T)
-        :param Z: float, partition function (computed below)
-        """
         self.beta = beta
         self.eps = eps 
         self.dim = 2
@@ -408,28 +497,56 @@ class DoubleWellPotAlongCircle :
 
 # -
 
-# We then define a function 'UnbiasedTraj' to generate an trajectory according an Euler--Maruyama discretization 
+# ### we visualise the potential
+
+# +
+nx = 100
+ny = 150
+dx = (x_domain[1] - x_domain[0]) / nx
+dy = (y_domain[1] - y_domain[0]) / ny
+
+gridx = np.linspace(x_domain[0], x_domain[1], nx)
+gridy = np.linspace(y_domain[0], y_domain[1], ny)
+x_plot = np.outer(gridx, np.ones(ny)) 
+y_plot = np.outer(gridy, np.ones(nx)).T 
+
+x2d = np.concatenate((x_plot.reshape(nx * ny, 1), y_plot.reshape(nx * ny, 1)), axis=1)
+
+pot_on_grid = pot.V(x2d).reshape(nx, ny)
+print ( "min and max values of potential: (%.4f, %.4f)" % (pot_on_grid.min(), pot_on_grid.max()) )
+
+fig = plt.figure(figsize=(9,3))
+ax0 = fig.add_subplot(1, 2, 1, projection='3d')
+ax1 = fig.add_subplot(1, 2, 2)
+ax0.set_title(pot_name)
+ax0.plot_surface(x_plot, y_plot, pot_on_grid , cmap='coolwarm', edgecolor='none')
+ax1.pcolormesh(x_plot, y_plot, pot_on_grid, cmap='coolwarm',shading='auto', vmin=v_min_max[pot_id][0], vmax=v_min_max[pot_id][1])
+
+if save_fig_to_file :
+    filename = f"{model_path}/{pot_name}.jpg" 
+    fig.savefig(filename)
+    print ( "potential profiles saved to file: %s" % filename )
+
+# -
+
+# ### generate a trajectory according an Euler--Maruyama discretization 
 # $$
 # X^{n+1} = X^n - \Delta t \nabla V(X^n) + \sqrt{\frac{2 \Delta t}{\beta}} \, G^n 
 # $$
-# of the overdamped Langevin dynamics
-# $$
-# dX_t = -\nabla V(X_t) \, dt + \sqrt{\frac{2}{\beta}} \, dW_t
-# $$
-# This functions takes as argument a potential object, initial conditions, the number of simulation steps and a time step. It generates a realization of a trajectory (subsampled at some prescribed rate), and possibly records the value of the potential energy function at the points along the trajectory.
 
-def UnbiasedTraj(pot, X_0, delta_t=1e-3, T=1000, save=1, save_energy=False, seed=0):
+# +
+def UnbiasedTraj(pot, X_0, delta_t=1e-3, N=1000, save=1, save_energy=False, seed=0):
     """Simulates an overdamped langevin trajectory with a Euler-Maruyama numerical scheme 
 
     :param pot: potential object, must have methods for energy gradient and energy evaluation
     :param X_0: Initial position, must be a 2D vector
     :param delta_t: Discretization time step
-    :param T: Number of points in the trajectory (the total simulation time is therefore T * delta_t)
+    :param N: Number of points in the trajectory (the total simulation time is therefore N * delta_t)
     :param save: Integer giving the period (counted in number of steps) at which the trajectory is saved
     :param save_energy: Boolean parameter to save energy along the trajectory
 
-    :return: traj: np.array with ndim = 2 and shape = (T // save + 1, 2)
-    :return: Pot_values: np.array with ndim = 2 and shape = (T // save + 1, 1)
+    :return: traj: np.array with ndim = 2 and shape = (N // save + 1, 2)
+    :return: Pot_values: np.array with ndim = 2 and shape = (N // save + 1, 1)
     """
     r = np.random.RandomState(seed)
     X = X_0.reshape(1,2)
@@ -439,7 +556,7 @@ def UnbiasedTraj(pot, X_0, delta_t=1e-3, T=1000, save=1, save_energy=False, seed
         Pot_values = [pot.V(X)]
     else:
         Pot_values = None
-    for i in range(T):
+    for i in tqdm(range(N)):
         b = r.normal(size=(dim,))
         X = X - pot.nabla_V(X.reshape(1,2)) * delta_t + np.sqrt(2 * delta_t/pot.beta) * b
         if i % save==0:
@@ -448,10 +565,40 @@ def UnbiasedTraj(pot, X_0, delta_t=1e-3, T=1000, save=1, save_energy=False, seed
                 Pot_values.append(pot.V(X)[0])
     return np.array(traj), np.array(Pot_values)
 
+x_0 = np.array(x0_list[pot_id])
 
-# ### Task 1: train Autoencoder
+### Generate the trajectory
+trajectory, _ = UnbiasedTraj(pot, x_0, delta_t=delta_t, N=N, save=save, save_energy=False, seed=args.seed)
+
+### Plot the trajectory 
+fig = plt.figure(figsize=(10,5))
+ax0 = fig.add_subplot(1, 2, 1)
+ax1 = fig.add_subplot(1, 2, 2)
+nx = ny = 200
+h = np.histogram2d(trajectory[:,0], trajectory[:,1], bins=[nx, ny], range=[[x_domain[0],x_domain[1]],[y_domain[0],y_domain[1]]])[0]
+s = sum(sum(h))
+im = ax0.imshow(h.T / (s * dx * dy), origin = "lower", \
+                extent=[x_domain[0],x_domain[1],y_domain[0], y_domain[1]], \
+                cmap=cm.jet, vmin=0.0, vmax=0.3)
+#fig.colorbar(im, cax=cax, cmap=cm.jet)
+#ax0.pcolormesh(x_plot, y_plot, pot_on_grid, cmap='coolwarm_r', shading='auto')
+ax1.scatter(trajectory[:,0], trajectory[:,1], marker='x')
+#ax1.plot(range(len(trajectory[:,0])), trajectory[:,0], label='x coodinate along trajectory')
+
+if save_fig_to_file :
+    traj_filename = f"{model_path}/traj_{pot_name}.jpg" 
+    fig.savefig(traj_filename)
+    print ("trajectory plot saved to file: %s" % traj_filename)
+
+
+# -
+
+# ### define two training tasks 
+#
+# #### task 1: train autoencoder  
 
 # +
+
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers = []
     for i in range(len(layer_dims)-2) :
@@ -495,6 +642,8 @@ class AutoEncoderTask(object):
         self.model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
         # print the model
         print ('\nAutoencoder: input dim: {}, encoded dim: {}\n'.format(self.input_dim, self.k), self.model)
+
+        print (f'Training result will be saved in: {model_path}.\nView it in tensorboard!\n')
         
         if args.optimizer == 'Adam':
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
@@ -586,9 +735,10 @@ class AutoEncoderTask(object):
 
 # -
 
-# ### Task 2: train eigenfunction
+# ### task 2: train eigenfunction 
 
 # +
+
 class EigenFunction(nn.Module):
     def __init__(self, layer_dims, k, activation=torch.nn.Tanh()):
         super(EigenFunction, self).__init__()       
@@ -607,7 +757,7 @@ class EigenFunctionTask(object):
         self.k = args.k
         self.model_path = model_path
         self.writer = SummaryWriter(model_path)
-
+        
         self.alpha = args.alpha
         self.beta = beta
         self.sort_eigvals_in_training = args.sort_eigvals_in_training
@@ -637,6 +787,8 @@ class EigenFunctionTask(object):
         self.model = EigenFunction(layer_dims, self.k, args.activation())
 
         print ('\nEigenfunctions:\n', self.model)
+
+        print (f'Training result will be saved in: {model_path}.\nView it in tensorboard!\n')
 
         if args.optimizer == 'Adam':
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
@@ -700,14 +852,14 @@ class EigenFunctionTask(object):
         
         for idx in range(self.k):
             eigenfunc = eigenfuncs_on_grid[:,idx].reshape(100,100)
-            print ( "min and max values of %dth eigenfunc: (%.4f, %.4f)" % (idx, eigenfunc.min(), eigenfunc.max()) )
+            #print ( "min and max values of %dth eigenfunc: (%.4f, %.4f)" % (idx, eigenfunc.min(), eigenfunc.max()) )
 
             fig, ax = plt.subplots()
             ax.pcolormesh(x_plot, y_plot, eigenfunc, cmap='coolwarm',shading='auto')
 
             fig_name = f"{self.model_path}/eigenfunc_{idx}_{epoch}.jpg"
             fig.savefig(fig_name)
-            print ( "%d eigenfunction profile saved to file: %s" % (idx, fig_name) )
+            #print ( "%d eigenfunction profile saved to file: %s" % (idx, fig_name) )
             plt.close()
             self.writer.add_image(f'{idx}th eigenfunction', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), global_step=epoch, dataformats='HWC')
 
@@ -776,152 +928,7 @@ class EigenFunctionTask(object):
 
 # -
 
-# ## Part 2: run a test.
-
-# All the parameters are set in the cell below. 
-
-# +
-def set_all_seeds(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        np.random.seed(seed)
-    random.seed(seed)
-    
-class MyArgs(object):
-
-    def __init__(self, pot_name, train_autoencoder=True):
-
-        #set training parameters
-        self.use_gpu = False
-        self.batch_size = 100 
-        self.num_epochs = 50 
-        self.test_ratio = 0.2
-        self.learning_rate = 0.02 
-        self.optimizer = 'Adam' # 'SGD'
-        self.model_save_dir = 'checkpoint'  
-        self.pot_name = pot_name
-
-        self.k = 2 
-        self.activation_name = 'Tanh'  
-        if train_autoencoder :
-            self.e_layer_dims = [20, 20, 20] 
-            self.d_layer_dims = [20, 20, 20] 
-        else :
-            self.layer_dims = [20, 20, 20] 
-            self.alpha = 20.0 
-            self.eig_w = [1.0, 0.6] 
-            self.diffusion_coeff = 1e-5 
-            self.sort_eigvals_in_training = True 
-
-        self.activation = getattr(torch.nn, self.activation_name) 
-
-        self.seed = 30 
-
-        if self.seed:
-            set_all_seeds(self.seed)
-
-        # CUDA support
-        if torch.cuda.is_available() and self.use_gpu:
-            self.device = torch.device('cuda')
-        else:
-            self.device = torch.device('cpu')
-
-pot_list = [ TripleWellPotential, TripleWellOneChannelPotential, DoubleWellPotential, ZPotential, \
-                TripleWellPotAlongCircle, StiffPot, UniformPotAlongCircle, DoubleWellPotAlongCircle ] 
-
-# choose a potential in the pot_list above
-pot_id = 4
-eps = 0.1
-beta = 1.0 
-
-# for data generation
-delta_t = 0.001
-T = 100000
-save = 10
-
-# x and y domains for each potential
-x_domains = [[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5], [-3.5, 3.5], [-2.5, 2.5], [-2, 2], [-1.5, 1.5], [-1.5, 1.5] ]
-y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-2.5, 2.5], [-2.0, 1.5], [-1.5, 1.5], [-1.5, 1.5] ]
-x0_list = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1] ]
-v_min_max = [[-4,3], [-4,3], [-4,7], [0.3,8], [0,5], [0,5], [0,5], [0,5] ]
-
-pot = pot_list[pot_id](beta, eps)
-x_domain = x_domains[pot_id] 
-y_domain = y_domains[pot_id] 
-
-pot_name = type(pot).__name__
-
-print ('potential name: %s' % pot_name) 
-
-save_fig_to_file = False
-
-train_autoencoder = False
-
-args = MyArgs(pot_name, train_autoencoder)
-
-if train_autoencoder:
-    cv_name = 'autoencoder'
-else:
-    cv_name = 'eigenfunction'
-        
-# path to store log data
-prefix = f"{cv_name}-{pot_name}-" 
-model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
-print ('\nLog directory: {}\n'.format(model_path))
-
-# -
-
-# First, we visualise our different potentials.
-
-# +
-gridx = np.linspace(x_domain[0], x_domain[1], 100)
-gridy = np.linspace(y_domain[0], y_domain[1], 100)
-x_plot = np.outer(gridx, np.ones(100)) 
-y_plot = np.outer(gridy, np.ones(100)).T 
-
-x2d = np.concatenate((x_plot.reshape(100 * 100, 1), y_plot.reshape(100 * 100, 1)), axis=1)
-
-pot_on_grid = pot.V(x2d).reshape(100,100)
-print ( "min and max values of potential: (%.4f, %.4f)" % (pot_on_grid.min(), pot_on_grid.max()) )
-
-fig = plt.figure(figsize=(9,3))
-ax0 = fig.add_subplot(1, 2, 1, projection='3d')
-ax1 = fig.add_subplot(1, 2, 2)
-ax0.set_title(pot_name)
-ax0.plot_surface(x_plot, y_plot, pot_on_grid , cmap='coolwarm', edgecolor='none')
-ax1.pcolormesh(x_plot, y_plot, pot_on_grid, cmap='coolwarm',shading='auto', vmin=v_min_max[pot_id][0], vmax=v_min_max[pot_id][1])
-
-if save_fig_to_file :
-    filename = f"{model_path}/{pot_name}.jpg" 
-    fig.savefig(filename)
-    print ( "potential profiles saved to file: %s" % filename )
-
-# -
-
-# Data set generation 
-
-# In the following we generate a trajectory in the desired potential with the function previously defined. 
-
-# +
-x_0 = np.array(x0_list[pot_id])
-
-### Generate the trajectory
-trajectory, _ = UnbiasedTraj(pot, x_0, delta_t=delta_t, T=T, save=save, save_energy=False, seed=args.seed)
-
-### Plot the trajectory 
-fig = plt.figure(figsize=(9,3))
-ax0 = fig.add_subplot(1, 2, 1)
-ax1 = fig.add_subplot(1, 2, 2)
-ax0.pcolormesh(x_plot, y_plot, pot_on_grid, cmap='coolwarm_r', shading='auto')
-ax0.scatter(trajectory[:,0], trajectory[:,1], marker='x')
-ax1.plot(range(len(trajectory[:,0])), trajectory[:,0], label='x coodinate along trajectory')
-
-if save_fig_to_file :
-    traj_filename = f"{model_path}/traj_{pot_name}.jpg" 
-    fig.savefig(traj_filename)
-    print ("trajectory plot saved to file: %s" % traj_filename)
-
+# ## execute a training task
 
 # +
 if train_autoencoder:
