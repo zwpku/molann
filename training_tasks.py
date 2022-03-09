@@ -140,9 +140,9 @@ class AutoEncoderTask(TrainingTask):
             print (f'model parameters loaded from: {self.args.load_model_filename}')
 
         if args.optimizer == 'Adam':
-            self.optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         else:
-            self.optimizer = torch.optim.SGD(model.parameters(), lr=self.learning_rate)
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
 
         #--- prepare the data ---
         self.weights = torch.tensor(traj_obj.weights)
@@ -182,6 +182,8 @@ class AutoEncoderTask(TrainingTask):
         # --- start the training over the required number of epochs ---
         self.loss_list = []
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
+        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs))
+
         for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset
             self.model.train()
@@ -354,6 +356,8 @@ class EigenFunctionTask(TrainingTask):
         # --- start the training over the required number of epochs ---
         self.loss_list = []
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
+        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs))
+
         for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset
             self.model.train()

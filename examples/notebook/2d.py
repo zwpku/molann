@@ -412,52 +412,6 @@ def set_all_seeds(seed):
         np.random.seed(seed)
     random.seed(seed)
     
-class MyArgs(object):
-
-    def __init__(self, pot_name, train_autoencoder=True):
-
-        #set training parameters
-        self.use_gpu = False
-        self.batch_size = 1000
-        self.num_epochs = 50 
-        self.test_ratio = 0.2
-        self.learning_rate = 0.005 
-        self.optimizer = 'Adam' # 'SGD'
-        self.model_save_dir = 'checkpoint'  
-        self.pot_name = pot_name
-
-        self.k = 2 # dimension of autoencoder, or number of eigenfunctions
-        self.activation_name = 'Tanh'  
-        if train_autoencoder :
-            self.e_layer_dims = [20, 20, 20] 
-            self.d_layer_dims = [20, 20, 20] 
-        else :
-            self.layer_dims = [20, 20, 20] 
-            self.alpha = 20.0 
-            self.eig_w = [1.0, 0.8, 0.6] 
-            self.diffusion_coeff = 1e-5 
-            self.sort_eigvals_in_training = True 
-
-        self.activation = getattr(torch.nn, self.activation_name) 
-
-        self.seed = 30 
-
-        if self.seed:
-            set_all_seeds(self.seed)
-
-        # CUDA support
-        if torch.cuda.is_available() and self.use_gpu:
-            self.device = torch.device('cuda')
-        else:
-            self.device = torch.device('cpu')
-
-
-
-# -
-
-# ### continue to define parameters
-
-# +
 # x and y domains for each potential
 x_domains = [[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2, 2], [-1.5, 1.5], [-1.5, 1.5] ]
 y_domains = [[-1.5, 2.5], [-1.5, 2.5], [-1.5, 2.5], [-3.5, 3.5], [-3.0, 3.0], [-2.0, 1.5], [-1.5, 1.5], [-1.5, 1.5] ]
@@ -469,8 +423,9 @@ pot_list = [ TripleWellPotential, TripleWellOneChannelPotential, DoubleWellPoten
         TripleWellPotAlongCircle, StiffPot, UniformPotAlongCircle, DoubleWellPotAlongCircle ] 
 
 # choose a potential in the pot_list above
-pot_id = 4
+pot_id = 5
 
+seed = 30
 eps = 0.5
 beta = 1.0 
 pot = pot_list[pot_id](beta, eps)
@@ -484,23 +439,16 @@ y_domain = y_domains[pot_id]
 # for data generation
 delta_t = 0.001
 N = 10000000
-save = 10
+save = 50
 
 save_fig_to_file = False
 
-train_autoencoder = True #False
-
-args = MyArgs(pot_name, train_autoencoder)
-
-if train_autoencoder:
-    cv_name = 'autoencoder'
-else:
-    cv_name = 'eigenfunction'
-        
 # path to store log data
-prefix = f"{cv_name}-{pot_name}-" 
-model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
+prefix = f"{pot_name}-" 
+model_path = os.path.join('checkpoint', prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
 print ('\nLog directory: {}\n'.format(model_path))
+        
+set_all_seeds(seed)
 
 # -
 
@@ -577,7 +525,7 @@ def UnbiasedTraj(pot, X_0, delta_t=1e-3, N=1000, save=1, save_energy=False, seed
 x_0 = np.array(x0_list[pot_id])
 
 ### Generate the trajectory
-trajectory, _ = UnbiasedTraj(pot, x_0, delta_t=delta_t, N=N, save=save, save_energy=False, seed=args.seed)
+trajectory, _ = UnbiasedTraj(pot, x_0, delta_t=delta_t, N=N, save=save, save_energy=False, seed=seed)
 
 ### Plot the trajectory 
 fig = plt.figure(figsize=(10,5))
@@ -900,7 +848,7 @@ class EigenFunctionTask(object):
             # Train the model by going through the whole dataset
             self.model.train()
             train_loss = []
-            for iteration, [X, weight, index] in tqdm(enumerate(train_loader)):
+            for iteration, [X, weight, index] in enumerate(train_loader):
                 X.requires_grad_()
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
@@ -942,9 +890,54 @@ class EigenFunctionTask(object):
 
 # -
 
+# ### define parameters
+
+class MyArgs(object):
+
+    def __init__(self, pot_name, train_autoencoder=True):
+
+        #set training parameters
+        self.use_gpu = False
+        self.batch_size = 1000
+        self.num_epochs = 20 
+        self.test_ratio = 0.1
+        self.learning_rate = 0.005 
+        self.optimizer = 'Adam' # 'SGD'
+        self.pot_name = pot_name
+
+        self.k = 2 # dimension of autoencoder, or number of eigenfunctions
+        self.activation_name = 'Tanh'  
+        if train_autoencoder :
+            self.e_layer_dims = [20, 20, 20] 
+            self.d_layer_dims = [20, 20, 20] 
+        else :
+            self.layer_dims = [20, 20, 20] 
+            self.alpha = 20.0 
+            self.eig_w = [1.0, 0.8, 0.6] 
+            self.diffusion_coeff = 1e-5 
+            self.sort_eigvals_in_training = True 
+
+        self.activation = getattr(torch.nn, self.activation_name) 
+
+        # CUDA support
+        if torch.cuda.is_available() and self.use_gpu:
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+
+
 # ## execute a training task
 
 # +
+train_autoencoder = False
+
+args = MyArgs(pot_name, train_autoencoder)
+
+if train_autoencoder:
+    cv_name = 'autoencoder'
+else:
+    cv_name = 'eigenfunction'
+        
 if train_autoencoder:
     train_obj = AutoEncoderTask(args, trajectory, model_path)
 else:
