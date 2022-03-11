@@ -17,6 +17,7 @@ class TrainingTask(object):
         self.args = args
         self.k = args.k
         self.model_path = model_path
+        self.num_scatter_states = args.num_scatter_states
 
         print ('\nLog directory: {}\n'.format(self.model_path))
         self.writer = SummaryWriter(self.model_path)
@@ -83,8 +84,11 @@ class TrainingTask(object):
 
         print (f'script model for CVs saved at:\n\t{trained_cv_script_filename}\n')
 
-    def plot_scattered_cv_on_feature_space(self, X, index, epoch): 
+    def plot_scattered_cv_on_feature_space(self, epoch): 
 
+        index = np.random.choice(np.arange(self.feature_traj.shape[0], dtype=int), self.num_scatter_states, replace=False)
+
+        X = self.feature_traj[index,:]
         feature_data = self.output_features[index,:]
         cv_vals = self.cv_on_data(X)
 
@@ -146,10 +150,10 @@ class AutoEncoderTask(TrainingTask):
 
         #--- prepare the data ---
         self.weights = torch.tensor(traj_obj.weights)
-        self.traj = self.preprocessing_layer(traj_obj.trajectory)
+        self.feature_traj = self.preprocessing_layer(traj_obj.trajectory)
 
         # print information of trajectory
-        print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
+        print ( '\nshape of trajectory data array:\n {}'.format(self.feature_traj.shape) )
 
     def colvar_model(self):
         return ColVar(self.preprocessing_layer, self.model.encoder)
@@ -167,7 +171,7 @@ class AutoEncoderTask(TrainingTask):
         """Function to train the model
         """
         # split the dataset into a training set (and its associated weights) and a test set
-        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(self.traj, self.weights, torch.arange(self.traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
+        X_train, X_test, w_train, w_test, index_train, index_test = train_test_split(self.feature_traj, self.weights, torch.arange(self.feature_traj.shape[0], dtype=torch.long), test_size=self.test_ratio)  
 
         # method to construct data batches and iterate over them
         train_loader = torch.utils.data.DataLoader(dataset = torch.utils.data.TensorDataset(X_train, w_train, index_train),
@@ -214,7 +218,7 @@ class AutoEncoderTask(TrainingTask):
             self.writer.add_scalar('Loss/test', torch.mean(torch.tensor(test_loss)), epoch)
 
             if self.output_features is not None :
-                self.plot_scattered_cv_on_feature_space(X, index, epoch)
+                self.plot_scattered_cv_on_feature_space(epoch)
 
             if epoch % self.save_model_every_step == 0 :
                 self.save_model(epoch=epoch)
@@ -239,12 +243,12 @@ class EigenFunctionTask(TrainingTask):
 
         #--- prepare the data ---
         self.weights = torch.tensor(traj_obj.weights)
-        self.traj = traj_obj.trajectory
+        traj = traj_obj.trajectory
 
         # print information of trajectory
-        print ( '\nshape of trajectory data array:\n {}'.format(self.traj.shape) )
+        print ( '\nshape of trajectory data array:\n {}'.format(traj.shape) )
 
-        self.tot_dim = self.traj.shape[1] * 3 
+        self.tot_dim = traj.shape[1] * 3 
 
         # diagnoal matrix 
         # the unit of eigenvalues given by Rayleigh quotients is ns^{-1}.
@@ -263,13 +267,12 @@ class EigenFunctionTask(TrainingTask):
         print ('\nEigenfunctions:\n', self.model, flush=True)
 
         print ('\nPrecomputing gradients of features...')
-        self.traj.requires_grad_()
-        self.feature_traj = self.preprocessing_layer(self.traj)
+        traj.requires_grad_()
+        self.feature_traj = self.preprocessing_layer(traj)
 
-        f_grad_vec = [torch.autograd.grad(outputs=self.feature_traj[:,idx].sum(), inputs=self.traj, retain_graph=True)[0] for idx in range(feature_dim)]
+        f_grad_vec = [torch.autograd.grad(outputs=self.feature_traj[:,idx].sum(), inputs=traj, retain_graph=True)[0] for idx in range(feature_dim)]
         self.feature_grad_vec = torch.stack([f_grad.reshape((-1, self.tot_dim)) for f_grad in f_grad_vec], dim=2).detach()
 
-        self.traj = self.traj.detach()
         self.feature_traj = self.feature_traj.detach()
 
         print ('  shape of feature_gradient vec:', self.feature_grad_vec.shape)
@@ -289,7 +292,7 @@ class EigenFunctionTask(TrainingTask):
         return ColVar(self.preprocessing_layer, self.model)
 
     def cv_on_data(self, X):
-        return self.model(X)
+        return self.model(X)[:,self.cvec]
 
     def loss_func(self, X, weight, f_grad):
         # Evaluate function value on data
@@ -372,7 +375,7 @@ class EigenFunctionTask(TrainingTask):
                 #f_grad=None
 
                 # Evaluate loss
-                loss, eig_vals, non_penalty_loss, penalty, cvec = self.loss_func(X, weight, f_grad)
+                loss, eig_vals, non_penalty_loss, penalty, self.cvec = self.loss_func(X, weight, f_grad)
                 # Get gradient with respect to parameters of the model
                 loss.backward(retain_graph=True)
                 # Store loss
@@ -403,7 +406,7 @@ class EigenFunctionTask(TrainingTask):
                 self.writer.add_scalar(f'{idx}th eigenvalue', torch.mean(torch.stack(test_eig_vals)[:,idx]), epoch)
 
             if self.output_features is not None :
-                self.plot_scattered_cv_on_feature_space(X, index, epoch)
+                self.plot_scattered_cv_on_feature_space(epoch)
 
             if epoch % self.save_model_every_step == 0 :
                 self.save_model(epoch=epoch)

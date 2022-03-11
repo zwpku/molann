@@ -57,6 +57,7 @@ class MyArgs(object):
         self.align_selector = config['Training'].get('align_mda_selector')
         self.feature_file = config['Training'].get('feature_file')
         self.seed = config['Training'].getint('seed')
+        self.num_scatter_states = config['Training'].getint('num_scatter_states')
 
         if self.seed:
             set_all_seeds(self.seed)
