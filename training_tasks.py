@@ -19,7 +19,7 @@ class TrainingTask(object):
         self.model_path = model_path
         self.num_scatter_states = args.num_scatter_states
 
-        print ('\nLog directory: {}\n'.format(self.model_path))
+        print ('\nLog directory: {}\n'.format(self.model_path), flush=True)
         self.writer = SummaryWriter(self.model_path)
 
         if self.histogram_feature_mapper is not None :
@@ -41,7 +41,7 @@ class TrainingTask(object):
             plt.close()
             self.writer.add_image(f'feature along trajectory', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), dataformats='HWC')
 
-            print (f'Histogram and trajectory plots of features saved.') 
+            print (f'Histogram and trajectory plots of features saved.', flush=True) 
 
         if self.output_feature_mapper is not None :
             self.output_features = self.output_feature_mapper(traj_obj.trajectory).detach().numpy()
@@ -62,7 +62,7 @@ class TrainingTask(object):
         if 'position' in [f.type_name for f in feature_list] : # if atom positions are used, add alignment to preprocessing layer
             align_atom_ids = self.traj_obj.u.select_atoms(self.args.align_selector).ids
             print ('\nAdd alignment to preprocessing layer.\naligning by atoms:')
-            print (self.traj_obj.atoms_info.loc[self.traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']])
+            print (self.traj_obj.atoms_info.loc[self.traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']], flush=True)
             align = Align(self.traj_obj.ref_pos, align_atom_ids)
         else :
             align = torch.nn.Identity()
@@ -82,7 +82,7 @@ class TrainingTask(object):
         trained_cv_script_filename = f'{self.model_path}/trained_cv_scripted.pt'
         torch.jit.script(cv).save(trained_cv_script_filename)
 
-        print (f'script model for CVs saved at:\n\t{trained_cv_script_filename}\n')
+        print (f'script model for CVs saved at:\n\t{trained_cv_script_filename}\n', flush=True)
 
     def plot_scattered_cv_on_feature_space(self, epoch): 
 
@@ -153,7 +153,7 @@ class AutoEncoderTask(TrainingTask):
         self.feature_traj = self.preprocessing_layer(traj_obj.trajectory)
 
         # print information of trajectory
-        print ( '\nshape of trajectory data array:\n {}'.format(self.feature_traj.shape) )
+        print ( '\nshape of trajectory data array:\n {}'.format(self.feature_traj.shape), flush=True )
 
     def colvar_model(self):
         return ColVar(self.preprocessing_layer, self.model.encoder)
@@ -186,7 +186,7 @@ class AutoEncoderTask(TrainingTask):
         # --- start the training over the required number of epochs ---
         self.loss_list = []
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
-        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs))
+        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs), flush=True)
 
         for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset
@@ -277,7 +277,7 @@ class EigenFunctionTask(TrainingTask):
 
         print ('  shape of feature_gradient vec:', self.feature_grad_vec.shape)
 
-        print ('Done\n')
+        print ('Done\n', flush=True)
 
         if os.path.isfile(args.load_model_filename): 
             self.model.load_state_dict(torch.load(args.load_model_filename))
@@ -359,7 +359,7 @@ class EigenFunctionTask(TrainingTask):
         # --- start the training over the required number of epochs ---
         self.loss_list = []
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
-        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs))
+        print ("%d iterations per epoch, %d iterations in total." % (len(train_loader), len(train_loader) * self.num_epochs), flush=True)
 
         for epoch in tqdm(range(self.num_epochs)):
             # Train the model by going through the whole dataset

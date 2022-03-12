@@ -68,7 +68,7 @@ class MyArgs(object):
         else:
             self.device = torch.device('cpu')
         
-        print (f'Parameters loaded from: {config_filename}\n')
+        print (f'Parameters loaded from: {config_filename}\n', flush=True)
 
 def main():
 
