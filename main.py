@@ -65,9 +65,14 @@ class MyArgs(object):
         # CUDA support
         if torch.cuda.is_available() and self.use_gpu:
             self.device = torch.device('cuda')
+            print (f'device name: {self.device}')
+            print ('Active CUDA Device: GPU', torch.cuda.current_device())
+            print ('Available devices: ', torch.cuda.device_count())
+            print ('CUDA name: ', torch.cuda.get_device_name(0))
         else:
             self.device = torch.device('cpu')
-        
+            print (f'device name: {self.device}')
+
         print (f'Parameters loaded from: {config_filename}\n', flush=True)
 
 def main():

@@ -1,4 +1,3 @@
-
 from utils import *
 import cv2 as cv
 import itertools 
@@ -18,6 +17,7 @@ class TrainingTask(object):
         self.k = args.k
         self.model_path = model_path
         self.num_scatter_states = args.num_scatter_states
+        self.device = args.device
 
         print ('\nLog directory: {}\n'.format(self.model_path), flush=True)
         self.writer = SummaryWriter(self.model_path)
@@ -72,6 +72,7 @@ class TrainingTask(object):
     def save_model(self, epoch=0):
 
         print (f"\n\nepoch={epoch}") 
+
         #save the model
         trained_model_filename = f'{self.model_path}/trained_model.pt'
         torch.save(self.model.state_dict(), trained_model_filename)  
@@ -88,9 +89,9 @@ class TrainingTask(object):
 
         index = np.random.choice(np.arange(self.feature_traj.shape[0], dtype=int), self.num_scatter_states, replace=False)
 
-        X = self.feature_traj[index,:]
+        X = self.feature_traj[index,:].to(self.device)
         feature_data = self.output_features[index,:]
-        cv_vals = self.cv_on_data(X)
+        cv_vals = self.cv_on_data(X).cpu()
 
         k = cv_vals.size(1)
 
@@ -135,7 +136,7 @@ class AutoEncoderTask(TrainingTask):
         d_layer_dims = [self.k] + args.d_layer_dims + [feature_dim]
 
         # define autoencoder
-        self.model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation())
+        self.model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation()).to(device=self.device)
         # print the model
         print ('\nAutoencoder: input dim: {}, encoded dim: {}\n'.format(feature_dim, self.k), self.model)
 
@@ -193,6 +194,9 @@ class AutoEncoderTask(TrainingTask):
             self.model.train()
             train_loss = []
             for iteration, [X, weight, index] in enumerate(train_loader):
+
+                X, weight, index = X.to(self.device), weight.to(self.device), index.to(self.device)
+
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
                 # Evaluate loss
@@ -209,6 +213,9 @@ class AutoEncoderTask(TrainingTask):
                 # Evaluation of test loss
                 test_loss = []
                 for iteration, [X, weight, index] in enumerate(test_loader):
+
+                    X, weight, index = X.to(self.device), weight.to(self.device), index.to(self.device)
+
                     loss = self.weighted_MSE_loss(X, weight)
                     # Store loss
                     test_loss.append(loss)
@@ -252,7 +259,7 @@ class EigenFunctionTask(TrainingTask):
 
         # diagnoal matrix 
         # the unit of eigenvalues given by Rayleigh quotients is ns^{-1}.
-        self.diag_coeff = torch.ones(self.tot_dim).double() * args.diffusion_coeff * 1e7 * self.beta
+        self.diag_coeff = torch.ones(self.tot_dim).double().to(self.device) * args.diffusion_coeff * 1e7 * self.beta
 
         # define preprocessing layer: first align (if positions are used), then map to features
         self.preprocessing_layer = self.setup_preprocessing_layer()
@@ -262,7 +269,7 @@ class EigenFunctionTask(TrainingTask):
 
         layer_dims = [feature_dim] + args.layer_dims + [1]
 
-        self.model = EigenFunction(layer_dims, self.k, self.args.activation())
+        self.model = EigenFunction(layer_dims, self.k, self.args.activation()).to(self.device)
 
         print ('\nEigenfunctions:\n', self.model, flush=True)
 
@@ -271,7 +278,7 @@ class EigenFunctionTask(TrainingTask):
         self.feature_traj = self.preprocessing_layer(traj)
 
         f_grad_vec = [torch.autograd.grad(outputs=self.feature_traj[:,idx].sum(), inputs=traj, retain_graph=True)[0] for idx in range(feature_dim)]
-        self.feature_grad_vec = torch.stack([f_grad.reshape((-1, self.tot_dim)) for f_grad in f_grad_vec], dim=2).detach()
+        self.feature_grad_vec = torch.stack([f_grad.reshape((-1, self.tot_dim)) for f_grad in f_grad_vec], dim=2).detach().to(self.device)
 
         self.feature_traj = self.feature_traj.detach()
 
@@ -366,13 +373,15 @@ class EigenFunctionTask(TrainingTask):
             self.model.train()
             train_loss = []
             for iteration, [X, weight, index] in enumerate(train_loader) :
+
+                X, weight, index = X.to(self.device), weight.to(self.device), index.to(self.device)
+
                 # we will compute spatial gradients
                 X.requires_grad_()
                 # Clear gradients w.r.t. parameters
                 self.optimizer.zero_grad()
 
-                f_grad = self.feature_grad_vec[index, :, :]
-                #f_grad=None
+                f_grad = self.feature_grad_vec[index, :, :].to(self.device)
 
                 # Evaluate loss
                 loss, eig_vals, non_penalty_loss, penalty, self.cvec = self.loss_func(X, weight, f_grad)
@@ -388,8 +397,11 @@ class EigenFunctionTask(TrainingTask):
             test_eig_vals = []
             test_penalty = []
             for iteration, [X, weight, index] in enumerate(test_loader):
+
+                X, weight, index = X.to(self.device), weight.to(self.device), index.to(self.device)
+
                 X.requires_grad_()
-                f_grad = self.feature_grad_vec[index, :, :]
+                f_grad = self.feature_grad_vec[index, :, :].to(self.device)
                 loss, eig_vals, non_penalty_loss, penalty, cvec = self.loss_func(X, weight, f_grad)
                 # Store loss
                 test_loss.append(loss)
