@@ -2,6 +2,7 @@
 # +
 from utils import *
 import configparser
+import timeit
 from training_tasks import * 
 # -
 
@@ -71,6 +72,7 @@ class MyArgs(object):
             print ('CUDA name: ', torch.cuda.get_device_name(0))
         else:
             self.device = torch.device('cpu')
+            self.use_gpu = False
             print (f'device name: {self.device}')
 
         print (f'Parameters loaded from: {config_filename}\n', flush=True)
@@ -115,9 +117,22 @@ def main():
         model_path = os.path.join(args.model_save_dir, prefix + time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime()))
         train_obj = EigenFunctionTask(args, traj_obj, model_path, histogram_feature_mapper, output_feature_mapper)
 
-    # train autoencoder
-    train_obj.train()
+    if args.use_gpu :
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        # train autoencoder
+        train_obj.train()
+        end.record()
+        torch.cuda.synchronize()
+        print ('Runtime : {:.2f}s\n'.format(start.elapsed_time(end) * 1e-3) )
+    else :
+        start = timeit.default_timer()
+        # train autoencoder
+        train_obj.train()
+        print ('Runtime : {:.2f}s\n'.format(timeit.default_timer() - start) )
 
 if __name__ == "__main__":
     main()
+
 

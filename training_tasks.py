@@ -18,6 +18,7 @@ class TrainingTask(object):
         self.model_path = model_path
         self.num_scatter_states = args.num_scatter_states
         self.device = args.device
+        self.use_gpu = args.use_gpu
 
         print ('\nLog directory: {}\n'.format(self.model_path), flush=True)
         self.writer = SummaryWriter(self.model_path)
@@ -115,8 +116,6 @@ class TrainingTask(object):
 
             self.writer.add_image(f'scattered {self.model_name} {idx}', cv.cvtColor(cv.imread(fig_name), cv.COLOR_BGR2RGB), global_step=epoch, dataformats='HWC')
 
-        # print (f'scattered {self.model_name} plot for {epoch}th epoch saved.') 
-
 # Task to solve autoencoder
 class AutoEncoderTask(TrainingTask):
 
@@ -198,7 +197,7 @@ class AutoEncoderTask(TrainingTask):
                 X, weight, index = X.to(self.device), weight.to(self.device), index.to(self.device)
 
                 # Clear gradients w.r.t. parameters
-                self.optimizer.zero_grad()
+                self.optimizer.zero_grad(set_to_none=True)
                 # Evaluate loss
                 loss = self.weighted_MSE_loss(X, weight)
                 # Get gradient with respect to parameters of the model
@@ -379,7 +378,7 @@ class EigenFunctionTask(TrainingTask):
                 # we will compute spatial gradients
                 X.requires_grad_()
                 # Clear gradients w.r.t. parameters
-                self.optimizer.zero_grad()
+                self.optimizer.zero_grad(set_to_none=True)
 
                 f_grad = self.feature_grad_vec[index, :, :].to(self.device)
 
@@ -391,8 +390,8 @@ class EigenFunctionTask(TrainingTask):
                 train_loss.append(loss)
                 # Updating parameters
                 self.optimizer.step()
+
             # Evaluate the test loss on the test dataset
-                # Evaluation of test loss
             test_loss = []
             test_eig_vals = []
             test_penalty = []
