@@ -28,7 +28,7 @@ class MyArgs(object):
         self.temp = config['System'].getfloat('temperature')
 
          # unit: kJ/mol
-        kT = self.temp * 1.380649 * 6.02214076 * 0.001  
+        kT = self.temp * 1.380649 * 6.02214076 * 1e-3
         self.beta = 1.0 / kT
          
         #set training parameters
