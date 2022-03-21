@@ -18,7 +18,7 @@ from datetime import datetime
 # -
 
 class Trajectory(object):
-    def __init__(self, pdb_filename, traj_dcd_filename):
+    def __init__(self, pdb_filename, traj_dcd_filename, beta=1.0, bias_filename=None):
         # load the trajectory data from DCD file
         self.u = mda.Universe(pdb_filename, traj_dcd_filename)
 
@@ -45,6 +45,13 @@ class Trajectory(object):
 
         self.ref_pos = self.ref.atoms.positions
 
+        if bias_filename :
+            biases = self.load_biases(bias_filename)
+            unnormalized_weights = [math.exp(bias * beta) for bias in biases]
+            self.weights = np.asarray(unnormalized_weights / np.mean(unnormalized_weights) )
+        else :
+            self.weights = np.ones(self.n_frames)
+
     def load_traj(self):
 
         print ('\nloading trajectory to numpy array...', end='')
@@ -53,18 +60,33 @@ class Trajectory(object):
 
         print ('done.')
 
+        self.start_time = self.u.trajectory.time
+        self.dt = self.u.trajectory.dt
+        self.n_frames = self.u.trajectory.n_frames
+
         # print information of trajectory
         print ('\nTrajectory Info:\n\
         \tno. of frames in trajectory data: {}\n\
-        \ttimestep: {:.1f}ps\n\
+        \tstepsize: {:.1f}ps\n\
+        \ttime of first frame: {:.1f}ps\n\
         \ttime length: {:.1f}ps\n\
-        \tshape of trajectory data array: {}\n'.format(self.u.trajectory.n_frames, 
-                                          self.u.trajectory.time, 
+        \tshape of trajectory data array: {}\n'.format(self.n_frames, 
+                                          self.dt, 
+                                          self.start_time, 
                                           self.u.trajectory.totaltime,
                                           self.trajectory.shape
                                          )
               )
-        self.weights = np.ones(self.trajectory.shape[0])
+
+
+    def load_biases(self, bias_filename):
+        print ('\nloading bias from file: ', bias_filename)
+        time_bias_vec = np.loadtxt(bias_filename)
+        if self.start_time - time_bias_vec[0,0] > 0.01 or self.n_frames != time_bias_vec.shape[0] :
+            print ('Error: time in bias file does match the trajectory data!\n')
+            exit(0)
+        # biases are in the second column
+        return time_bias_vec[:,1]
 
 class Feature(object):
     def __init__(self, name, feature_type, ag):

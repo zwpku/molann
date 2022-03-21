@@ -20,6 +20,8 @@ class TrainingTask(object):
         self.device = args.device
         self.use_gpu = args.use_gpu
 
+        self.beta = args.beta
+
         print ('\nLog directory: {}\n'.format(self.model_path), flush=True)
         self.writer = SummaryWriter(self.model_path)
 
@@ -182,7 +184,7 @@ class AutoEncoderTask(TrainingTask):
                                                    batch_size=self.batch_size,
                                                    drop_last=True,
                                                    shuffle=False)
-        
+
         # --- start the training over the required number of epochs ---
         self.loss_list = []
         print ("\ntraining starts, %d epochs in total." % self.num_epochs) 
@@ -239,7 +241,6 @@ class EigenFunctionTask(TrainingTask):
         self.model_name = 'eigenfunction'
 
         self.alpha = args.alpha
-        self.beta = args.beta
         self.sort_eigvals_in_training = args.sort_eigvals_in_training
         self.eig_w = args.eig_w
 

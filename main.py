@@ -23,8 +23,14 @@ class MyArgs(object):
 
         self.pdb_filename = config['System'].get('pdb_filename')
         self.traj_dcd_filename = config['System'].get('traj_dcd_filename')
+        self.traj_bias_filename = config['System'].get('traj_bias_filename')
         self.sys_name = config['System'].get('sys_name')
-          
+        self.temp = config['System'].getfloat('temperature')
+
+         # unit: kJ/mol
+        kT = self.temp * 1.380649 * 6.02214076 * 0.001  
+        self.beta = 1.0 / kT
+         
         #set training parameters
         self.use_gpu =config['Training'].getboolean('use_gpu')
         self.batch_size = config['Training'].getint('batch_size')
@@ -37,8 +43,8 @@ class MyArgs(object):
         self.save_model_every_step = config['Training'].getint('save_model_every_step')
         self.train_ae = config['Training'].getboolean('train_autoencoder')
 
-        # encoded dimension
         if self.train_ae :
+            # encoded dimension
             self.k = config['AutoEncoder'].getint('encoded_dim')
             self.e_layer_dims = [int(x) for x in config['AutoEncoder'].get('encoder_hidden_layer_dims').split(',')]
             self.d_layer_dims = [int(x) for x in config['AutoEncoder'].get('decoder_hidden_layer_dims').split(',')]
@@ -49,7 +55,6 @@ class MyArgs(object):
             self.activation_name = config['EigenFunction'].get('activation') 
             self.alpha = config['EigenFunction'].getfloat('penalty_alpha')
             self.eig_w = [float(x) for x in config['EigenFunction'].get('eig_w').split(',')]
-            self.beta = config['EigenFunction'].getfloat('beta')
             self.diffusion_coeff = config['EigenFunction'].getfloat('diffusion_coeff')
             self.sort_eigvals_in_training = config['EigenFunction'].getboolean('sort_eigvals_in_training')
 
@@ -83,7 +88,7 @@ def main():
     args = MyArgs()
 
     # read trajectory
-    traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename)
+    traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename, args.beta, args.traj_bias_filename)
 
     # read features for histogram plot
     feature_reader = FeatureFileReader(args.feature_file, 'Histogram', traj_obj.u, ignore_position_feature=True)
