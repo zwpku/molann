@@ -18,7 +18,7 @@ from datetime import datetime
 # -
 
 class Trajectory(object):
-    def __init__(self, pdb_filename, traj_dcd_filename, beta=1.0, bias_filename=None):
+    def __init__(self, pdb_filename, traj_dcd_filename, beta=1.0, weight_filename=None):
         # load the trajectory data from DCD file
         self.u = mda.Universe(pdb_filename, traj_dcd_filename)
 
@@ -45,10 +45,10 @@ class Trajectory(object):
 
         self.ref_pos = self.ref.atoms.positions
 
-        if bias_filename :
-            biases = self.load_biases(bias_filename)
-            unnormalized_weights = [math.exp(bias * beta) for bias in biases]
-            self.weights = np.asarray(unnormalized_weights / np.mean(unnormalized_weights) )
+        if weight_filename :
+            self.weights = self.load_weights(weight_filename)
+            # normalize
+            self.weights = self.weights / np.mean(self.weights)
         else :
             self.weights = np.ones(self.n_frames)
 
@@ -79,14 +79,17 @@ class Trajectory(object):
               )
 
 
-    def load_biases(self, bias_filename):
-        print ('\nloading bias from file: ', bias_filename)
-        time_bias_vec = np.loadtxt(bias_filename)
-        if self.start_time - time_bias_vec[0,0] > 0.01 or self.n_frames != time_bias_vec.shape[0] :
-            print ('Error: time in bias file does match the trajectory data!\n')
+    def load_weights(self, weight_filename):
+        print ('\nloading weights from file: ', weight_filename)
+        time_weight_vec = pd.read_csv(weight_filename)
+        time_weight_vec['weight'] /= time_weight_vec['weight'].mean()
+        print ('\n', time_weight_vec.head(8))
+        time_weight_vec = time_weight_vec.to_numpy()
+        if self.start_time - time_weight_vec[0,0] > 0.01 or self.n_frames != time_weight_vec.shape[0] :
+            print ('Error: time in weight file does match the trajectory data!\n')
             exit(0)
-        # biases are in the second column
-        return time_bias_vec[:,1]
+        # weights are in the second column
+        return time_weight_vec[:,1]
 
 class Feature(object):
     def __init__(self, name, feature_type, ag):

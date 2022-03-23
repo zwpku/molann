@@ -23,7 +23,7 @@ class MyArgs(object):
 
         self.pdb_filename = config['System'].get('pdb_filename')
         self.traj_dcd_filename = config['System'].get('traj_dcd_filename')
-        self.traj_bias_filename = config['System'].get('traj_bias_filename')
+        self.traj_weight_filename = config['System'].get('traj_weight_filename')
         self.sys_name = config['System'].get('sys_name')
         self.temp = config['System'].getfloat('temperature')
 
@@ -88,14 +88,14 @@ def main():
     args = MyArgs()
 
     # read trajectory
-    traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename, args.beta, args.traj_bias_filename)
+    traj_obj = Trajectory(args.pdb_filename, args.traj_dcd_filename, args.beta, args.traj_weight_filename)
 
     # read features for histogram plot
     feature_reader = FeatureFileReader(args.feature_file, 'Histogram', traj_obj.u, ignore_position_feature=True)
     feature_list = feature_reader.read()
 
     histogram_feature_mapper = FeatureMap(feature_list, use_angle_value=True)
-    histogram_feature_mapper.info('Features to plot histograms\n')
+    histogram_feature_mapper.info('\nFeatures to plot histograms\n')
 
     # make sure each feature is one-dimensional
     assert histogram_feature_mapper.feature_total_dimension() == len(feature_list), "Feature map for histogram is incorrect" 
