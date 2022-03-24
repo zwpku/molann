@@ -12,6 +12,8 @@ import pandas as pd
 # -
 
 class Trajectory(object):
+    """class that stores trajectory data.
+    """
     def __init__(self, pdb_filename, traj_dcd_filename, beta=1.0, weight_filename=None):
         # load the trajectory data from DCD file
         self.u = mda.Universe(pdb_filename, traj_dcd_filename)
@@ -86,6 +88,9 @@ class Trajectory(object):
         return time_weight_vec[:,1]
 
 class Feature(object):
+    """Feature 
+    """
+
     def __init__(self, name, feature_type, ag):
 
         if feature_type not in ['angle', 'bond', 'dihedral', 'position']:
@@ -322,6 +327,8 @@ class AutoEncoder(torch.nn.Module):
         self.decoder = create_sequential_nn(d_layer_dims, activation)
 
     def forward(self, inp):
+        """TBA
+        """
         return self.decoder(self.encoder(inp))
 
 # eigenfunction class
@@ -333,5 +340,7 @@ class EigenFunction(torch.nn.Module):
         self.eigen_funcs = torch.nn.ModuleList([create_sequential_nn(layer_dims, activation) for idx in range(k)])
 
     def forward(self, inp):
+        """TBA"""
+
         return torch.cat([nn(inp) for nn in self.eigen_funcs], dim=1)
 

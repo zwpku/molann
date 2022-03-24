@@ -1,4 +1,4 @@
-import deepcv.utils as utils
+import molcv.utils as utils
 import cv2 as cv
 import itertools 
 import numpy as np
@@ -11,6 +11,8 @@ from tensorboardX import SummaryWriter
 import os
 
 class TrainingTask(object):
+    """class for a training task
+    """
     def __init__(self, args, traj_obj, model_path, histogram_feature_mapper=None, output_feature_mapper=None):
 
         self.learning_rate = args.learning_rate
@@ -61,11 +63,11 @@ class TrainingTask(object):
 
     def setup_preprocessing_layer(self):
         # read features from file to define preprocessing
-        feature_reader = FeatureFileReader(self.args.feature_file, 'Preprocessing', self.traj_obj.u, use_all_positions_by_default=True)
+        feature_reader = utils.FeatureFileReader(self.args.feature_file, 'Preprocessing', self.traj_obj.u, use_all_positions_by_default=True)
         feature_list = feature_reader.read()
         
         # define the map from positions to features 
-        feature_mapper = FeatureMap(feature_list)
+        feature_mapper = utils.FeatureMap(feature_list)
 
         # display information of features used 
         feature_mapper.info('\nFeatures in preprocessing layer:\n')
@@ -74,11 +76,11 @@ class TrainingTask(object):
             align_atom_ids = self.traj_obj.u.select_atoms(self.args.align_selector).ids
             print ('\nAdd alignment to preprocessing layer.\naligning by atoms:')
             print (self.traj_obj.atoms_info.loc[self.traj_obj.atoms_info['id'].isin(align_atom_ids)][['id','name', 'type']], flush=True)
-            align = Align(self.traj_obj.ref_pos, align_atom_ids)
+            align = utils.Align(self.traj_obj.ref_pos, align_atom_ids)
         else :
             align = torch.nn.Identity()
 
-        return Preprocessing(feature_mapper, align)
+        return utils.Preprocessing(feature_mapper, align)
 
     def save_model(self, epoch=0):
 
@@ -128,6 +130,8 @@ class TrainingTask(object):
 
 # Task to solve autoencoder
 class AutoEncoderTask(TrainingTask):
+    """Training task for autoencoder
+    """
 
     def __init__(self, args, traj_obj,  model_path, histogram_feature_mapper=None, output_feature_mapper=None):
 
@@ -145,7 +149,7 @@ class AutoEncoderTask(TrainingTask):
         d_layer_dims = [self.k] + args.d_layer_dims + [feature_dim]
 
         # define autoencoder
-        self.model = AutoEncoder(e_layer_dims, d_layer_dims, args.activation()).to(device=self.device)
+        self.model = utils.AutoEncoder(e_layer_dims, d_layer_dims, args.activation()).to(device=self.device)
         # print the model
         print ('\nAutoencoder: input dim: {}, encoded dim: {}\n'.format(feature_dim, self.k), self.model)
 
@@ -166,7 +170,7 @@ class AutoEncoderTask(TrainingTask):
         print ( '\nshape of trajectory data array:\n {}'.format(self.feature_traj.shape), flush=True )
 
     def colvar_model(self):
-        return ColVar(self.preprocessing_layer, self.model.encoder)
+        return utils.ColVar(self.preprocessing_layer, self.model.encoder)
 
     def weighted_MSE_loss(self, X, weight):
         # Forward pass to get output
@@ -242,6 +246,9 @@ class AutoEncoderTask(TrainingTask):
         print ("\ntraining ends.\n") 
 
 class EigenFunctionTask(TrainingTask):
+    """Training task for eigenfunctions 
+    """
+
     def __init__(self, args, traj_obj,  model_path, histogram_feature_mapper=None, output_feature_mapper=None):
 
         super(EigenFunctionTask, self).__init__(args, traj_obj, model_path, histogram_feature_mapper, output_feature_mapper)
@@ -277,7 +284,7 @@ class EigenFunctionTask(TrainingTask):
 
         layer_dims = [feature_dim] + args.layer_dims + [1]
 
-        self.model = EigenFunction(layer_dims, self.k, self.args.activation()).to(self.device)
+        self.model = utils.EigenFunction(layer_dims, self.k, self.args.activation()).to(self.device)
 
         print ('\nEigenfunctions:\n', self.model, flush=True)
 
@@ -304,7 +311,7 @@ class EigenFunctionTask(TrainingTask):
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
 
     def colvar_model(self):
-        return ColVar(self.preprocessing_layer, self.model)
+        return utils.ColVar(self.preprocessing_layer, self.model)
 
     def cv_on_data(self, X):
         return self.model(X)[:,self.cvec]
