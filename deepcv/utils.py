@@ -1,20 +1,14 @@
 #!/usr/bin/env python
 # +
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
-import math 
 import random
-from sklearn.model_selection import train_test_split 
 
 import MDAnalysis as mda
 from MDAnalysis.analysis import dihedrals 
-import pandas as pd
-from tqdm import tqdm
-from tensorboardX import SummaryWriter
-import os
 import time
 from datetime import datetime
+import pandas as pd
 # -
 
 class Trajectory(object):

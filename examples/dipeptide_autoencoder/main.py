@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # +
-from utils import *
+from deepcv.utils import Trajectory, FeatureFileReader, FeatureMap
 import configparser
 import timeit
-from training_tasks import * 
+from deecv.training_tasks import AutoEncoderTask, EigenFunctionTask 
 # -
 
 # +
