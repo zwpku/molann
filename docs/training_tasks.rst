@@ -1,7 +1,7 @@
 training_tasks
 ==============
 
-.. currentmodule:: molcv.training_tasks
+.. currentmodule:: training_tasks
 
 .. autosummary::
     :toctree: _autosummary 

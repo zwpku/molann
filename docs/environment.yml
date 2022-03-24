@@ -1,11 +1,11 @@
 name: molcv
 channels:
     - conda-forge
-    - omnia
 dependencies:
     - python>=3.7
     - setuptools
     - pytorch
-    - numpy
+    - numpy>=1.21.0
     - pyyaml
+    - pip>=21.1
     - mdanalysis
