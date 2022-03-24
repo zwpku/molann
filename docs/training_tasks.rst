@@ -8,5 +8,7 @@ training_tasks
     :template: class.rst
     :nosignatures:
 
-   TrainingTask
+    TrainingTask
+    AutoEncoderTask
+    EigenFunctionTask
 

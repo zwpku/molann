@@ -1,9 +1,16 @@
 #!/usr/bin/env python
 # +
-from deepcv.utils import Trajectory, FeatureFileReader, FeatureMap
+from molcv.trajectory import Trajectory
+from molcv.feature import FeatureFileReader, FeatureMap
 import configparser
 import timeit
-from deecv.training_tasks import AutoEncoderTask, EigenFunctionTask 
+from molcv.training_tasks import AutoEncoderTask, EigenFunctionTask 
+import torch
+import random
+import numpy as np
+import os
+import time
+
 # -
 
 # +

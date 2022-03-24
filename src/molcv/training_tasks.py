@@ -1,4 +1,5 @@
 import molcv.utils as utils
+import molcv.feature as feature
 import cv2 as cv
 import itertools 
 import numpy as np
@@ -63,11 +64,11 @@ class TrainingTask(object):
 
     def setup_preprocessing_layer(self):
         # read features from file to define preprocessing
-        feature_reader = utils.FeatureFileReader(self.args.feature_file, 'Preprocessing', self.traj_obj.u, use_all_positions_by_default=True)
+        feature_reader = feature.FeatureFileReader(self.args.feature_file, 'Preprocessing', self.traj_obj.u, use_all_positions_by_default=True)
         feature_list = feature_reader.read()
         
         # define the map from positions to features 
-        feature_mapper = utils.FeatureMap(feature_list)
+        feature_mapper = feature.FeatureMap(feature_list)
 
         # display information of features used 
         feature_mapper.info('\nFeatures in preprocessing layer:\n')

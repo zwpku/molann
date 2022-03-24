@@ -22,6 +22,8 @@ Modules
 .. toctree::
    :maxdepth: 2
 
+   trajectory
+   feature 
    utils
    training_tasks
 
