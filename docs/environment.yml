@@ -1,11 +1,20 @@
 name: molcv
 channels:
     - conda-forge
+    - defaults
 dependencies:
     - python>=3.7
+    - sphinx==1.8.5
+    - sphinx_rtd_theme
+    - scikit-learn
     - setuptools
     - pytorch
-    - numpy>=1.21.0
+    - numpy>=1.17.3
+    - pandas
+    - tqdm
+    - tensorboardX
+    - cv2
+    - matplotlib
     - pyyaml
     - pip>=21.1
     - mdanalysis

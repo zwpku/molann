@@ -12,6 +12,11 @@ conda:
 sphinx:
    configuration: docs/conf.py
 
+build:
+   os: ubuntu-20.04
+   tools:
+     python: "mambaforge-4.10"
+
 # Optionally build your docs in additional formats such as PDF
 # formats:
 #    - pdf
