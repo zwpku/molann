@@ -13,9 +13,9 @@ dependencies:
     - pandas
     - tqdm
     - tensorboardX
-    - cv2
     - matplotlib
     - pyyaml
     - pip>=21.1
     - mdanalysis==2.0.0
-    - opencv-contrib-python==4.5.5
+    - pip:
+      - opencv-contrib-python==4.5.5
