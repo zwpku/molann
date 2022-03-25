@@ -13,7 +13,7 @@ sphinx:
    configuration: docs/conf.py
 
 build:
-   os: ubuntu-20.04
+   os: "ubuntu-20.04"
    tools:
      python: "mambaforge-4.10"
 
@@ -23,7 +23,6 @@ build:
 
 # Optionally declare the Python requirements required to build your docs
 python:
-  version: 3.7
   install: 
      - method: pip
        path: .
