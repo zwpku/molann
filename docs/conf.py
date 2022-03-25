@@ -31,12 +31,13 @@ author = 'Wei Zhang'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+        'sphinx.ext.napoleon',
         'sphinx.ext.autodoc',
-        'sphinx.ext.autosummary'
+        'sphinx.ext.autosummary',
 ]
 
 autosummary_generate = True
-autodoc_default_flags=['members', 'undoc-members', 'inherited-members']
+autodoc_default_flags=['members']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

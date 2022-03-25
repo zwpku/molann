@@ -4,9 +4,23 @@ import pandas as pd
 import numpy as np
 
 class Trajectory(object):
-    """class that stores trajectory data.
+    r"""class that stores trajectory data.
+
+    Parameters
+    ----------
+    pdb_filename : str
+        name of pdf file
+    traj_dcd_filename : str
+        name of dcd file containing trajectory data
+
+    Attributes
+    ----------
+
+    Example
+    -------
     """
     def __init__(self, pdb_filename, traj_dcd_filename, beta=1.0, weight_filename=None):
+
         # load the trajectory data from DCD file
         self.u = mda.Universe(pdb_filename, traj_dcd_filename)
 
