@@ -1,12 +1,8 @@
 trajectory
 ==========
 
-.. currentmodule:: molcv.trajectory
-.. autosummary::
-    :toctree: _autosummary 
-    :template: class.rst
-    :nosignatures:
+.. automodule:: molcv.trajectory
+    :members:
 
-    Trajectory
 
 

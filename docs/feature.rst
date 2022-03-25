@@ -1,14 +1,8 @@
 feature
 =======
 
-.. currentmodule:: molcv.feature
-.. autosummary::
-    :toctree: _autosummary 
-    :template: class.rst
-    :nosignatures:
+.. automodule:: molcv.feature
+    :members:
 
-    Feature 
-    FeatureFileReader
-    FeatureMap
 
 
