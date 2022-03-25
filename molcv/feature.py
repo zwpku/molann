@@ -1,7 +1,17 @@
 import torch
 
 class Feature(object):
-    """Feature 
+    """Feature information 
+
+    Parameters
+    ----------
+    name : str
+        name of the feature 
+    feature_type : str
+        type of feature; supported value ares: 'angle', 'bond', 'dihedral', and 'position'
+    ag : list of int
+        atom group, list of atom indices
+
     """
 
     def __init__(self, name, feature_type, ag):
@@ -27,6 +37,14 @@ class Feature(object):
         self.type_id = type_id
 
 class FeatureFileReader(object):
+    r"""Read features from file
+
+    Parameters
+    ----------
+    feature_file : str
+        name of the feature file
+    """
+
     def __init__(self, feature_file, section_name, universe, ignore_position_feature=False, use_all_positions_by_default=False):
 
         self.feature_file = feature_file
@@ -78,6 +96,7 @@ class FeatureFileReader(object):
         return feature_list
 
 class FeatureMap(torch.nn.Module):
+
     def __init__(self, feature_list, use_angle_value=False):
         super(FeatureMap, self).__init__()
         self.num_features = len(feature_list)
@@ -88,17 +107,38 @@ class FeatureMap(torch.nn.Module):
         self.use_angle_value = use_angle_value
 
     def info(self, info_title):
+        r"""display information of features 
+
+        Parameters
+        ----------
+        info_title : str
+            texts to print before displaying information of features
+        """
+
         print (f'{info_title}Id.\tName\tType\tAtomIDs')
         for idx in range(self.num_features):
             print ('{}\t{}\t{}\t{}'.format(idx, self.name_list[idx], self.type_list[idx], self.ag_list[idx].numpy()))
 
     def feature_name(self, idx):
+        r"""return the name of feature 
+
+        Parameters
+        ----------
+        idx : int
+            index of feature
+        """
+
         return self.name_list[idx]
 
     def feature_all_names(self):
+        r"""return the list of feature names 
+        """
         return self.name_list
 
     def feature_total_dimension(self):
+        r"""return total dimension of features
+        """
+
         output_dim = 0
         for i in range(len(self.type_id_list)) :
             feature_id = self.type_id_list[i]
@@ -116,6 +156,17 @@ class FeatureMap(torch.nn.Module):
         return output_dim 
 
     def map_to_feature(self, x, idx: int):
+        r"""map position to certain feature 
+
+        Parameters
+        ----------
+        x : torch tensor 
+            coordinates of state
+        idx : int
+            index of feature
+
+        """
+
         feature_id = self.type_id_list[idx]
         ag = self.ag_list[idx]
 
@@ -154,7 +205,10 @@ class FeatureMap(torch.nn.Module):
 
         raise RuntimeError()
 
+
     def forward(self, x):
+        """forward map
+        """
         xf = self.map_to_feature(x, 0)
         for i in range(1, len(self.type_id_list)) :
             # Features are stored in columns 
