@@ -7,6 +7,15 @@ import random
 import MDAnalysis as mda
 # -
 
+def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
+    layers = []
+    for i in range(len(layer_dims)-2) :
+        layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
+        layers.append(activation)
+    layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
+
+    return torch.nn.Sequential(*layers).double()
+
 class Align(torch.nn.Module):
     def __init__(self, ref_pos, align_atom_ids):
         super(Align, self).__init__()
@@ -61,12 +70,23 @@ class Preprocessing(torch.nn.Module):
     def forward(self, inp):
         return self.feature_mapper(self.align(inp))
 
-def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
-    layers = []
-    for i in range(len(layer_dims)-2) :
-        layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
-        layers.append(activation)
-    layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
+class MolANN(torch.nn.Module):
+    def __init__(self, preprocessing_layer, layer):
+        super(MolANN, self).__init__()
+        self.preprocessing_layer = preprocessing_layer
+        self.layer = layer
+    def forward(self, inp):
+        return self.layer(self.preprocessing_layer(inp))
 
-    return torch.nn.Sequential(*layers).double()
+# ANN class
+class ANN(torch.nn.Module):
+    def __init__(self, layer_dims, k, activation=torch.nn.Tanh()):
+        super(ANN, self).__init__()
+        assert layer_dims[-1] == 1, "each component must be one-dimensional"
+
+        self.funcs = torch.nn.ModuleList([create_sequential_nn(layer_dims, activation) for idx in range(k)])
+
+    def forward(self, inp):
+        """TBA"""
+        return torch.cat([nn(inp) for nn in self.funcs], dim=1)
 
