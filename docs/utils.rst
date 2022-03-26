@@ -1,7 +1,7 @@
 utils
 =====
 
-.. automodule:: molcv.utils
+.. automodule:: molann.utils
     :members:
 
 

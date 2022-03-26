@@ -16,11 +16,11 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 import sphinx_rtd_theme
-import molcv
+import molann
 
 # -- Project information -----------------------------------------------------
 
-project = 'molcv'
+project = 'molann'
 copyright = '2022, Wei Zhang'
 author = 'Wei Zhang'
 

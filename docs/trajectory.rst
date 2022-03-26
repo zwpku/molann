@@ -1,7 +1,7 @@
 trajectory
 ==========
 
-.. automodule:: molcv.trajectory
+.. automodule:: molann.trajectory
     :members:
 
 

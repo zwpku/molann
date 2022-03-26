@@ -1,7 +1,7 @@
 feature
 =======
 
-.. automodule:: molcv.feature
+.. automodule:: molann.feature
     :members:
 
 

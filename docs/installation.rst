@@ -7,14 +7,14 @@ Installation
 
 .. code-block:: console
 
-   pip install molcv
+   pip install molann
 
 .. rubric:: from source
 
 .. code-block:: console
 
-   git clone https://github.com/zwpku/molcv
-   cd molcv
+   git clone https://github.com/zwpku/molann
+   cd molann
    python -m build
    python -m pip install .
 

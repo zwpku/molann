@@ -1,4 +1,4 @@
-name: molcv
+name: molann
 channels:
     - conda-forge
     - defaults

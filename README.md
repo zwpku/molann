@@ -1,7 +1,6 @@
-# MolCV
+# MolANN
 
-Find collective variables of molecular systems by training deep neural networks.
-
+Artificial Neural Networks for Molecular Systems
 
 ## Usage
 
