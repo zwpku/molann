@@ -4,7 +4,7 @@
    contain the root `toctree` directive.
 
 Welcome to molann's documentation!
-=================================
+==================================
 
 .. note::
    This project is under active development.
@@ -24,7 +24,7 @@ Modules
 
    trajectory
    feature 
-   utils
+   ann
 
 Indices and tables
 ==================
