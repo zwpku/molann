@@ -1,5 +1,5 @@
-utils
-=====
+ann
+===
 
 .. automodule:: molann.ann
     :members:
