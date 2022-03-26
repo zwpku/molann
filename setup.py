@@ -10,14 +10,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 if __name__ == '__main__':
     setuptools.setup(
-        name="molcv",
+        name="molann",
         version="0.0.9",
         author="Wei Zhang",
         author_email="wzhangpku@gmail.com",
         description="Find collective variables of molecular systems by training deep neural networks",
         long_description=long_description,
         long_description_content_type="text/markdown",
-        url="https://github.com/zwpku/molcv",
+        url="https://github.com/zwpku/molann",
         project_urls={
 #        "Bug Tracker": "https://github.com/pypa/sampleproject/issues",
         },
