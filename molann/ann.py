@@ -7,7 +7,6 @@ import random
 import MDAnalysis as mda
 # -
 
-
 class Align(torch.nn.Module):
     def __init__(self, ref_pos, align_atom_ids):
         super(Align, self).__init__()
@@ -70,37 +69,4 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
 
     return torch.nn.Sequential(*layers).double()
-
-class ColVar(torch.nn.Module):
-    def __init__(self, preprocessing_layer, layer):
-        super(ColVar, self).__init__()
-        self.preprocessing_layer = preprocessing_layer
-        self.layer = layer
-    def forward(self, inp):
-        return self.layer(self.preprocessing_layer(inp))
-
-# autoencoder class 
-class AutoEncoder(torch.nn.Module):
-    def __init__(self, e_layer_dims, d_layer_dims, activation=torch.nn.Tanh()):
-        super(AutoEncoder, self).__init__()
-        self.encoder = create_sequential_nn(e_layer_dims, activation)
-        self.decoder = create_sequential_nn(d_layer_dims, activation)
-
-    def forward(self, inp):
-        """TBA
-        """
-        return self.decoder(self.encoder(inp))
-
-# eigenfunction class
-class EigenFunction(torch.nn.Module):
-    def __init__(self, layer_dims, k, activation=torch.nn.Tanh()):
-        super(EigenFunction, self).__init__()
-        assert layer_dims[-1] == 1, "each eigenfunction must be one-dimensional"
-
-        self.eigen_funcs = torch.nn.ModuleList([create_sequential_nn(layer_dims, activation) for idx in range(k)])
-
-    def forward(self, inp):
-        """TBA"""
-
-        return torch.cat([nn(inp) for nn in self.eigen_funcs], dim=1)
 
