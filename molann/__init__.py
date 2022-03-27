@@ -1,3 +1,3 @@
 #!/usr/bin/env python
 
-from molann import trajectory, feature, ann
+from molann import feature, ann
