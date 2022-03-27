@@ -215,3 +215,10 @@ class FeatureMap(torch.nn.Module):
             xf = torch.cat((xf, self.map_to_feature(x, i)), dim=1)
         return xf
 
+class IdentityFeatureMap(torch.nn.Module):
+
+    def __init__(self):
+        pass
+
+    def forward(self, x):
+        return x
