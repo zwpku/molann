@@ -36,6 +36,31 @@ class Feature(object):
         self.atom_group = ag
         self.type_id = type_id
 
+    def name(self):
+        """
+        return feature's name
+        """
+        return self.name
+
+    def type(self):
+        """
+        return feature's type
+        """
+        return self.type_name
+
+    def atom_group(self):
+        """
+        return atom group
+        """
+        return self.atom_group
+
+    def type_id(self):
+        """
+        return atom group
+        """
+        return self.type_id
+
+
 class FeatureFileReader(object):
     r"""Read features from file
 
@@ -95,130 +120,4 @@ class FeatureFileReader(object):
 
         return feature_list
 
-class FeatureMap(torch.nn.Module):
 
-    def __init__(self, feature_list, use_angle_value=False):
-        super(FeatureMap, self).__init__()
-        self.num_features = len(feature_list)
-        self.name_list = [f.name for f in feature_list]
-        self.type_list = [f.type_name for f in feature_list]
-        self.type_id_list = [f.type_id for f in feature_list]
-        self.ag_list = [torch.tensor(f.atom_group-1) for f in feature_list] # minus one, so that it starts from 0
-        self.use_angle_value = use_angle_value
-
-    def info(self, info_title):
-        r"""display information of features 
-
-        Parameters
-        ----------
-        info_title : str
-            texts to print before displaying information of features
-        """
-
-        print (f'{info_title}Id.\tName\tType\tAtomIDs')
-        for idx in range(self.num_features):
-            print ('{}\t{}\t{}\t{}'.format(idx, self.name_list[idx], self.type_list[idx], self.ag_list[idx].numpy()))
-
-    def feature_name(self, idx):
-        r"""return the name of feature 
-
-        Parameters
-        ----------
-        idx : int
-            index of feature
-        """
-
-        return self.name_list[idx]
-
-    def feature_all_names(self):
-        r"""return the list of feature names 
-        """
-        return self.name_list
-
-    def feature_total_dimension(self):
-        r"""return total dimension of features
-        """
-
-        output_dim = 0
-        for i in range(len(self.type_id_list)) :
-            feature_id = self.type_id_list[i]
-            if feature_id == 0 : 
-                output_dim += 1 
-            if feature_id == 1 : 
-                output_dim += 1 
-            if feature_id == 2 : 
-                if self.use_angle_value == True :
-                    output_dim += 1 
-                else :
-                    output_dim += 2 
-            if feature_id == 3 :
-                output_dim += 3 * len(self.ag_list[i])
-        return output_dim 
-
-    def map_to_feature(self, x, idx: int):
-        r"""map position to certain feature 
-
-        Parameters
-        ----------
-        x : torch tensor 
-            coordinates of state
-        idx : int
-            index of feature
-
-        """
-
-        feature_id = self.type_id_list[idx]
-        ag = self.ag_list[idx]
-
-        if feature_id == 0 : # angle
-            r21 = x[:, ag[0], :] - x[:, ag[1], :]
-            r23 = x[:, ag[2], :] - x[:, ag[1], :]
-            r21l = torch.norm(r21, dim=1, keepdim=True)
-            r23l = torch.norm(r23, dim=1, keepdim=True)
-            cos_angle = (r21 * r23).sum(dim=1, keepdim=True) / (r21l * r23l)
-            if self.use_angle_value :
-                return torch.acos(cos_angle)
-            else :
-                return cos_angle
-
-        if feature_id == 1 : # bond length
-            r12 = x[:, ag[1], :] - x[:, ag[0], :]
-            return torch.norm(r12, dim=1, keepdim=True)
-
-        if feature_id == 2 : # dihedral angle
-            r12 = x[:, ag[1], :] - x[:, ag[0], :]
-            r23 = x[:, ag[2], :] - x[:, ag[1], :]
-            r34 = x[:, ag[3], :] - x[:, ag[2], :]
-            n1 = torch.cross(r12, r23)
-            n2 = torch.cross(r23, r34)
-            cos_phi = (n1*n2).sum(dim=1, keepdim=True)
-            sin_phi = (n1 * r34).sum(dim=1, keepdim=True) * torch.norm(r23, dim=1, keepdim=True)
-            radius = torch.sqrt(cos_phi**2 + sin_phi**2)
-
-            if self.use_angle_value :
-                return torch.atan2(sin_phi, cos_phi)
-            else :
-                return torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
-
-        if feature_id == 3: # atom_position 
-            return x[:, ag, :].reshape((-1, len(ag) * 3))
-
-        raise RuntimeError()
-
-
-    def forward(self, x):
-        """forward map
-        """
-        xf = self.map_to_feature(x, 0)
-        for i in range(1, len(self.type_id_list)) :
-            # Features are stored in columns 
-            xf = torch.cat((xf, self.map_to_feature(x, i)), dim=1)
-        return xf
-
-class IdentityFeatureMap(torch.nn.Module):
-
-    def __init__(self):
-        pass
-
-    def forward(self, x):
-        return x

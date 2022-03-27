@@ -1,7 +1,8 @@
 # MolANN
 
-Artificial Neural Networks (ANN) for Molecular Systems
+Artificial Neural Networks (ANNs) for Molecular Systems
 
-This package provides classes for building ANNs that include alignment layers and feature layers. 
+This package implements ANNs that include alignment layers and feature layers. 
+
 ## Usage
 
