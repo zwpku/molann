@@ -1,4 +1,5 @@
 import torch
+import pandas as pd
 
 class Feature(object):
     """Feature information 
@@ -6,60 +7,68 @@ class Feature(object):
     Parameters
     ----------
     name : str
-        name of the feature 
+        name of the feature
     feature_type : str
-        type of feature; supported value ares: 'angle', 'bond', 'dihedral', and 'position'
-    ag : list of int
-        atom group, list of atom indices
+        type of feature. Currently supported value ares: 'angle', 'bond', 'dihedral', and 'position'
+    atom_group : AtomGroup
+        AtomGroup. Atoms used in defining a feature 
 
     """
 
-    def __init__(self, name, feature_type, ag):
+    def __init__(self, feature_name, feature_type, atom_group):
 
         if feature_type not in ['angle', 'bond', 'dihedral', 'position']:
-            raise NotImplementedError(f'feature {feature_type} not implemented')
+            raise NotImplementedError(f'feature {feature_type} not implemented!')
+
+        if len(set(atom_group)) < len(atom_group) :
+            raise IndexError(f'atom group contains repeated elements!')
 
         if feature_type == 'angle': 
-            assert len(ag)==3, '3 atoms are needed to define an angle, {} provided'.format(len(ag))
+            assert len(atom_group)==3, '3 atoms are needed to define an angle feature, {} provided'.format(len(atom_group))
             type_id = 0 
         if feature_type == 'bond': 
-            assert len(ag)==2, '2 atoms are needed to define a bond length, {} provided'.format(len(ag))
+            assert len(atom_group)==2, '2 atoms are needed to define a bond length feature, {} provided'.format(len(atom_group))
             type_id = 1 
         if feature_type == 'dihedral': 
-            assert len(ag)==4, '4 atoms are needed to define a dihedral angle, {} provided'.format(len(ag))
+            assert len(atom_group)==4, '4 atoms are needed to define a dihedral angle feature, {} provided'.format(len(atom_group))
             type_id = 2 
         if feature_type == 'position':
             type_id = 3 
 
-        self.name = name
+        self.name = feature_name
         self.type_name = feature_type
-        self.atom_group = ag
+        self.atom_group = atom_group
         self.type_id = type_id
 
-    def name(self):
+    def get_name(self):
         """
         return feature's name
         """
         return self.name
 
-    def type(self):
+    def get_type(self):
         """
         return feature's type
         """
         return self.type_name
 
-    def atom_group(self):
+    def get_atom_indices(self):
         """
-        return atom group
+        return indices of atoms in the atom group
         """
-        return self.atom_group
+        return self.atom_group.ids
 
-    def type_id(self):
+    def get_type_id(self):
         """
-        return atom group
+        return feature id
         """
         return self.type_id
 
+    def get_feature_info(self):
+        """
+        TBA
+        """
+        return pd.DataFrame({'name': self.name, 'type': self.type_name, 'type_id': self.type_id, 'atom indices': [self.get_atom_indices()]})
 
 class FeatureFileReader(object):
     r"""Read features from file
@@ -70,17 +79,20 @@ class FeatureFileReader(object):
         name of the feature file
     """
 
-    def __init__(self, feature_file, section_name, universe, ignore_position_feature=False, use_all_positions_by_default=False):
+    def __init__(self, feature_file, section_name, universe):
+        """ init
+        """
 
         self.feature_file = feature_file
         self.section_name = section_name
-        self.use_all_positions_by_default = use_all_positions_by_default
-        self.ignore_position_feature = ignore_position_feature
         self.u = universe
 
     def read(self):
+        """
+        read features from file
+        """
 
-        feature_list = []
+        self.feature_list = []
 
         pp_cfg_file = open(self.feature_file, "r")
         in_section = False
@@ -99,25 +111,40 @@ class FeatureFileReader(object):
                     break
 
             if in_section :
-                feature_name, feature_type, selector = line.split(',')
+                ag = None
+                feature_name, feature_type, *selector_list = line.split(',')
+                for selector in selector_list:
+                    if ag is None :
+                        ag = self.u.select_atoms(selector)
+                    else :
+                        ag = ag + self.u.select_atoms(selector)
 
-                ag = self.u.select_atoms(selector).ids
                 feature = Feature(feature_name.strip(), feature_type.strip(), ag)
-
-                if feature.type_name == 'position' and self.ignore_position_feature :
-                    print (f'Position feature in section {self.section_name} ignored:\t {line}')
-                    continue
-
-                feature_list.append(feature)
+                self.feature_list.append(feature)
 
         pp_cfg_file.close()
 
-        if len(feature_list) == 0 and self.use_all_positions_by_default : ## in this case, positions of all atoms will be used.
-            print ("No valid features found, use positions of all atoms.\n") 
-            ag = self.u.atoms.ids 
-            feature = Feature('all', 'position', ag)
-            feature_list.append(feature)
+        if len(self.feature_list) == 0 : 
+           print ("Warning: no feature found! \n") 
+        else :
+           print ("\n{} features loaded\n".format(len(self.feature_list)) )
 
-        return feature_list
+        return self.feature_list
 
+    def get_feature_list(self):
+        """return list of features 
+        """
+        return self.feature_list
+
+    def get_num_of_features(self):
+        """return number of features
+        """
+        return len(self.feature_list)
+
+    def get_feature_info(self):
+        df = pd.DataFrame()
+        for f in self.feature_list:
+            f_info = f.get_feature_info()
+            df = df.append(f_info, ignore_index=True)
+        return df
 

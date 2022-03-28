@@ -77,7 +77,7 @@ class FeatureMap(torch.nn.Module):
         super(FeatureMap, self).__init__()
         self.feature = feature
         self.type_id = feature.type_id() 
-        self.ag = torch.tensor(feature.atom_group()-1)  # minus one, so that it starts from 0
+        self.atom_indices = torch.tensor(feature.atom_indices()-1)  # minus one, so that it starts from 0
         self.use_angle_value = use_angle_value
 
     def dim(self):
@@ -106,12 +106,12 @@ class FeatureMap(torch.nn.Module):
 
         """
 
-        ag = self.ag
+        atom_indices = self.atom_indices
         ret = None
 
         if self.type_id == 0 : # angle
-            r21 = x[:, ag[0], :] - x[:, ag[1], :]
-            r23 = x[:, ag[2], :] - x[:, ag[1], :]
+            r21 = x[:, atom_indices[0], :] - x[:, atom_indices[1], :]
+            r23 = x[:, atom_indices[2], :] - x[:, atom_indices[1], :]
             r21l = torch.norm(r21, dim=1, keepdim=True)
             r23l = torch.norm(r23, dim=1, keepdim=True)
             cos_angle = (r21 * r23).sum(dim=1, keepdim=True) / (r21l * r23l)
@@ -121,13 +121,13 @@ class FeatureMap(torch.nn.Module):
                 ret = cos_angle
 
         if self.type_id == 1 : # bond length
-            r12 = x[:, ag[1], :] - x[:, ag[0], :]
+            r12 = x[:, atom_indices[1], :] - x[:, atom_indices[0], :]
             ret = torch.norm(r12, dim=1, keepdim=True)
 
         if self.type_id == 2 : # dihedral angle
-            r12 = x[:, ag[1], :] - x[:, ag[0], :]
-            r23 = x[:, ag[2], :] - x[:, ag[1], :]
-            r34 = x[:, ag[3], :] - x[:, ag[2], :]
+            r12 = x[:, atom_indices[1], :] - x[:, atom_indices[0], :]
+            r23 = x[:, atom_indices[2], :] - x[:, atom_indices[1], :]
+            r34 = x[:, atom_indices[3], :] - x[:, atom_indices[2], :]
             n1 = torch.cross(r12, r23)
             n2 = torch.cross(r23, r34)
             cos_phi = (n1*n2).sum(dim=1, keepdim=True)
@@ -140,7 +140,7 @@ class FeatureMap(torch.nn.Module):
                 ret = torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
 
         if self.type_id == 3: # atom_position 
-            ret = x[:, ag, :].reshape((-1, len(ag) * 3))
+            ret = x[:, atom_indices, :].reshape((-1, len(atom_indices) * 3))
 
         return ret 
 
@@ -177,7 +177,7 @@ class FeatureLayer(torch.nn.Module):
 
         print (f'{info_title}Id.\tName\tType\tAtomIDs')
         for idx, f in enumerate(self.feature_list) :
-            print ( '{}\t{}\t{}\t{}'.format(idx, f.name(), f.type(), f.atom_group()) )
+            print ( '{}\t{}\t{}\t{}'.format(idx, f.get_name(), f.get_type(), f.get_atom_group()) )
 
     def feature_name(self, idx):
         r"""return the name of feature 
@@ -187,12 +187,12 @@ class FeatureLayer(torch.nn.Module):
         idx : int
             index of feature
         """
-        return self.feature_list[idx].name()
+        return self.feature_list[idx].get_name()
 
     def all_feature_names(self):
         r"""return the list of all feature names 
         """
-        return [f.name() for f in self.feature_list]
+        return [f.get_name() for f in self.feature_list]
 
     def output_dimension(self):
         r"""return total dimension of features
