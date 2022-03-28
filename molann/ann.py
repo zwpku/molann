@@ -15,7 +15,7 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
         layers.append(activation)
     layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
 
-    return torch.nn.Sequential(*layers).double()
+    return torch.nn.Sequential(*layers)
 
 class AlignmentLayer(torch.nn.Module):
     """ ANN Layer that performs alignment 
@@ -28,7 +28,7 @@ class AlignmentLayer(torch.nn.Module):
 
         super(AlignmentLayer, self).__init__()
         self.align_atom_indices = torch.tensor(align_atom_group.ids - 1).long() # minus one, such that the index starts from 0
-        self.ref_x = torch.from_numpy(align_atom_group.positions).double()        
+        self.ref_x = torch.from_numpy(align_atom_group.positions)        
 
         # shift reference state 
         ref_c = torch.mean(self.ref_x, 0) 
@@ -56,7 +56,7 @@ class AlignmentLayer(torch.nn.Module):
         prod = torch.matmul(xtmp, self.ref_x) # dimension: traj_length x 3 x 3
         u, s, vh = torch.linalg.svd(prod)
 
-        diag_mat = torch.diag(torch.ones(3)).double().unsqueeze(0).repeat(traj.size(0), 1, 1)
+        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(traj.size(0), 1, 1)
 
         sign_vec = torch.sign(torch.linalg.det(torch.matmul(u, vh))).detach()
         diag_mat[:,2,2] = sign_vec
@@ -193,29 +193,6 @@ class FeatureLayer(torch.nn.Module):
         xf = torch.cat(xf_vec, dim=1)
         return xf
 
-class IdentityFeatureLayer(torch.nn.Module):
-    """
-    Feature layer that corresponds to the identity map
-    """
-
-    def __init__(self, dim):
-        """
-        TBA
-        """
-        self.dim = dim
-
-    def output_dimension(self):
-        """
-        return the dimension of the output layer
-        """
-        return self.dim
-
-    def forward(self, x):
-        """
-        forward map
-        """
-        return x
-
 class PreprocessingANN(torch.nn.Module):
     """Preprocessing ANN
     """
@@ -259,7 +236,7 @@ class MolANN(torch.nn.Module):
         self.preprocessing_layer = preprocessing_layer
         self.ann_layers = ann_layers
 
-    def preprocessing_layer(self):
+    def get_preprocessing_layer(self):
         """
         return the preprocessing_layer 
         """
