@@ -142,6 +142,8 @@ class FeatureFileReader(object):
         return len(self.feature_list)
 
     def get_feature_info(self):
+        """return a pandas DataFrame including information of all features
+        """
         df = pd.DataFrame()
         for f in self.feature_list:
             f_info = f.get_feature_info()

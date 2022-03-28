@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # +
 import torch
+import pandas as pd
 # -
 
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     """
     TBA
     """
+    assert len(layer_dims) >= 2, 'Error: at least 2 layers are needed to define a neural network (length={})!'.format(len(layer_dims))
     layers = []
     for i in range(len(layer_dims)-2) :
         layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
@@ -19,15 +21,14 @@ class AlignmentLayer(torch.nn.Module):
     """ ANN Layer that performs alignment 
     """
 
-    def __init__(self, ref_pos, align_atom_ids):
+    def __init__(self, align_atom_group):
         """
         TBA
         """
 
         super(AlignmentLayer, self).__init__()
-        self.align_atom_ids = align_atom_ids 
-        self.align_atom_indices = torch.tensor(self.align_atom_ids-1).long() # minus one, such that the index starts from 0
-        self.ref_x = torch.from_numpy(ref_pos[self.align_atom_indices, :]).double()        
+        self.align_atom_indices = torch.tensor(align_atom_group.ids - 1).long() # minus one, such that the index starts from 0
+        self.ref_x = torch.from_numpy(align_atom_group.positions).double()        
 
         # shift reference state 
         ref_c = torch.mean(self.ref_x, 0) 
@@ -37,8 +38,8 @@ class AlignmentLayer(torch.nn.Module):
         """
         TBA
         """
-        print ('atom indices used for alignment: ', self.align_atom_indices.numpy())
-        print ('\n\treference state used in aligment:\n', self.ref_x.numpy())
+        print ('\natom indices used for alignment: ', self.align_atom_indices.numpy())
+        print ('\nreference state used in aligment:\n', self.ref_x.numpy())
 
     def forward(self, traj):  
         """
@@ -76,15 +77,14 @@ class FeatureMap(torch.nn.Module):
         """
         super(FeatureMap, self).__init__()
         self.feature = feature
-        self.type_id = feature.type_id() 
-        self.atom_indices = torch.tensor(feature.atom_indices()-1)  # minus one, so that it starts from 0
+        self.type_id = feature.get_type_id() 
+        self.atom_indices = torch.tensor(feature.get_atom_indices()-1)  # minus one, so that it starts from 0
         self.use_angle_value = use_angle_value
 
     def dim(self):
         r"""return total dimension of features
         """
         output_dim = 0
-        self.type_id = self.type_id_list[i]
         if self.type_id == 0 or self.type_id == 1 : # angle or bond
             output_dim = 1 
         if self.type_id == 2 : # dihedral angle
@@ -93,7 +93,7 @@ class FeatureMap(torch.nn.Module):
             else :
                 output_dim = 2 
         if self.type_id == 3 : # position 
-            output_dim = 3 * len(self.feature.atom_group())
+            output_dim = 3 * len(self.feature.get_atom_indices())
         return output_dim 
 
     def forward(self, x):
@@ -107,7 +107,8 @@ class FeatureMap(torch.nn.Module):
         """
 
         atom_indices = self.atom_indices
-        ret = None
+
+        ret = torch.tensor(0.0)
 
         if self.type_id == 0 : # angle
             r21 = x[:, atom_indices[0], :] - x[:, atom_indices[1], :]
@@ -144,15 +145,6 @@ class FeatureMap(torch.nn.Module):
 
         return ret 
 
-    def forward(self, x):
-        """forward map
-        """
-        xf = self.map_to_feature(x, 0)
-        for i in range(1, len(self.type_id_list)) :
-            # Features are stored in columns 
-            xf = torch.cat((xf, self.map_to_feature(x, i)), dim=1)
-        return xf
-
 class FeatureLayer(torch.nn.Module):
     """
     ANN layer that map coordinates to all features
@@ -163,23 +155,22 @@ class FeatureLayer(torch.nn.Module):
         TBA
         """
         super(FeatureLayer, self).__init__()
+
+        assert len(feature_list) > 0, 'Error: feature list is empty!'
+
         self.feature_list = feature_list
-        self.feature_map_list = [FeatureMap(f, use_angle_value) for f in feature_list]
+        self.feature_map_list = torch.nn.ModuleList([FeatureMap(f, use_angle_value) for f in feature_list])
 
-    def info(self, info_title):
+    def get_feature_info(self):
         r"""display information of features 
-
-        Parameters
-        ----------
-        info_title : str
-            texts to print before displaying information of features
         """
+        df = pd.DataFrame()
+        for f in self.feature_list:
+            df = df.append(f.get_feature_info(), ignore_index=True)
+        print (df)
 
-        print (f'{info_title}Id.\tName\tType\tAtomIDs')
-        for idx, f in enumerate(self.feature_list) :
-            print ( '{}\t{}\t{}\t{}'.format(idx, f.get_name(), f.get_type(), f.get_atom_group()) )
 
-    def feature_name(self, idx):
+    def get_feature(self, idx):
         r"""return the name of feature 
 
         Parameters
@@ -187,25 +178,19 @@ class FeatureLayer(torch.nn.Module):
         idx : int
             index of feature
         """
-        return self.feature_list[idx].get_name()
-
-    def all_feature_names(self):
-        r"""return the list of all feature names 
-        """
-        return [f.get_name() for f in self.feature_list]
+        return self.feature_list[idx]
 
     def output_dimension(self):
         r"""return total dimension of features
         """
-        return np.sum([f_map.dim() for f_map in self.feature_map_list])
+        return sum([f_map.dim() for f_map in self.feature_map_list])
 
     def forward(self, x):
         """forward map
         """
-        xf = self.feature_map_list[0](x)
-        for i in range(1, len(self.feature_map_list)) :
-            # Features are stored in columns 
-            xf = torch.cat((xf, self.feature_map_list[i](x)), dim=1)
+        xf_vec = [fmap(x) for fmap in self.feature_map_list]
+        # Features are stored in columns 
+        xf = torch.cat(xf_vec, dim=1)
         return xf
 
 class IdentityFeatureLayer(torch.nn.Module):
