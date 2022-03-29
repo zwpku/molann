@@ -1,4 +1,4 @@
-r"""Features of Molecuar System --- :mod:`molann.feature`
+r"""Features of Molecular System --- :mod:`molann.feature`
 ==========================================================
 
 :Author: Wei Zhang
@@ -19,22 +19,25 @@ import torch
 import pandas as pd
 
 class Feature(object):
-    r"""Feature information 
+    r"""Feature 
 
     Parameters
     ----------
     name : str
-        name of the feature
+        feature's name
     feature_type : str
-        type of feature. Currently supported value ares: 'angle', 'bond', 'dihedral', and 'position'
-    atom_group : AtomGroup
-        AtomGroup. Atoms used in defining a feature 
+        feature's type. Currently supported values: 'angle', 'bond', 'dihedral', and 'position'
+    atom_group : :class:`MDAnalysis.core.groups.AtomGroup`
+        AtomGroup used to define a feature 
 
     Attributes
     ----------
     name : str
-    type : int
-
+        feature's name
+    type_name : str
+        'angle', 'bond', 'dihedral', or 'position'
+    type_id : int
+        0 for 'angle'; 1 for 'bond'; 2 for 'dihedral'; 3 for 'position'
 
     Note
     ----
@@ -60,7 +63,7 @@ class Feature(object):
 
     """
 
-    def __init__(self, feature_name, feature_type, atom_group):
+    def __init__(self, name, feature_type, atom_group):
 
         if feature_type not in ['angle', 'bond', 'dihedral', 'position']:
             raise NotImplementedError(f'feature {feature_type} not implemented!')
@@ -80,38 +83,38 @@ class Feature(object):
         if feature_type == 'position':
             type_id = 3 
 
-        self.name = feature_name
+        self.name = name
         self.type_name = feature_type
         self.atom_group = atom_group
         self.type_id = type_id
 
     def get_name(self):
         """
-        return feature's name
+        :attr:`name`
         """
         return self.name
 
     def get_type(self):
         """
-        return feature's type
+        :attr:`type_name`
         """
         return self.type_name
 
     def get_atom_indices(self):
         """
-        return indices of atoms in the atom group
+        list of indices of atoms in the atom group. The indices start from 1.
         """
         return self.atom_group.ids
 
     def get_type_id(self):
         """
-        return feature id
+        :attr:`type_id`
         """
         return self.type_id
 
     def get_feature_info(self):
         """
-        TBA
+        :class:`pandas.DataFrame` that contains feature's information 
         """
         return pd.DataFrame({'name': self.name, 'type': self.type_name, 'type_id': self.type_id, 'atom indices': [self.get_atom_indices()]})
 
