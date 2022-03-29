@@ -1,4 +1,4 @@
-r"""Artificial Neural networks for Molecuar System --- :mod:`molann.ann`
+r"""Artificial Neural networks for Molecular System --- :mod:`molann.ann`
 ========================================================================
 
 :Author: Wei Zhang

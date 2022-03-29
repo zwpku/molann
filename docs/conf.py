@@ -36,7 +36,11 @@ extensions = [
         'sphinx.ext.autodoc',
         'sphinx.ext.viewcode',
         'sphinx.ext.mathjax',
+        'sphinx.ext.intersphinx',
 ]
+
+
+intersphinx_mapping = {'mdanalysis': ('https://docs.mdanalysis.org/stable', None)}
 
 mathjax_path = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML'
 
