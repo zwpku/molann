@@ -38,8 +38,8 @@ class AlignmentLayer(torch.nn.Module):
         """
         TBA
         """
-        print ('\natom indices used for alignment: ', self.align_atom_indices.numpy())
-        print ('\nreference state used in aligment:\n', self.ref_x.numpy())
+        print ('\natom indices used for alignment: \n', self.align_atom_indices.numpy())
+        print ('\npositions of reference state used in aligment:\n', self.ref_x.numpy())
 
     def forward(self, traj):  
         """
@@ -168,7 +168,6 @@ class FeatureLayer(torch.nn.Module):
         for f in self.feature_list:
             df = df.append(f.get_feature_info(), ignore_index=True)
         print (df)
-
 
     def get_feature(self, idx):
         r"""return the name of feature 
