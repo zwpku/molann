@@ -3,11 +3,11 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to molann's documentation!
+Welcome to molann's documentation
 ==================================
 
 .. note::
-   This project is under active development.
+   This project is under development.
 
 .. toctree::
    :maxdepth: 2
@@ -20,7 +20,7 @@ Modules
 --------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    feature 
    ann

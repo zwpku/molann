@@ -1,8 +1,32 @@
-#!/usr/bin/env python
-# +
+r"""Artificial Neural networks for Molecuar System --- :mod:`molann.ann`
+========================================================================
+
+:Author: Wei Zhang
+:Year: 2022
+:Copyright: GNU Public License v3
+
+Classes
+-------
+.. autoclass:: AlignmentLayer
+    :members:
+
+.. autoclass:: FeatureMap
+    :members:
+
+.. autoclass:: FeatureLayer
+    :members:
+
+.. autoclass:: PreprocessingANN
+    :members:
+
+.. autoclass:: MolANN
+    :members:
+
+"""
+
+
 import torch
 import pandas as pd
-# -
 
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     """
@@ -167,7 +191,7 @@ class FeatureLayer(torch.nn.Module):
         df = pd.DataFrame()
         for f in self.feature_list:
             df = df.append(f.get_feature_info(), ignore_index=True)
-        print (df)
+        return df
 
     def get_feature(self, idx):
         r"""return the name of feature 

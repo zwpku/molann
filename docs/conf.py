@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath('..'))
 
+#import msmb_theme
 import sphinx_rtd_theme
 import molann
 
@@ -33,8 +34,20 @@ author = 'Wei Zhang'
 extensions = [
         'sphinx.ext.napoleon',
         'sphinx.ext.autodoc',
-        'sphinx.ext.autosummary',
+        'sphinx.ext.viewcode',
+        'sphinx.ext.mathjax',
 ]
+
+mathjax_path = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML'
+
+# The name of the Pygments (syntax highlighting) style to use.
+pygments_style = 'default'
+
+# A list of ignored prefixes for module index sorting.
+#modindex_common_prefix = []
+
+# to include decorated objects like __init__
+autoclass_content = 'both'
 
 autosummary_generate = True
 autodoc_default_flags=['members']
@@ -53,12 +66,40 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'alabaster'
-#html_theme = 'sphinx_rtd_theme'
+#html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
+#html_theme = 'msmb_theme'
 
+color = {'orange': '#FF9200',
+         'gray': '#808080',
+         'white': '#FFFFFF',
+         'black': '#000000', }
+
+html_theme_options = {
+    'canonical_url': '',
+    'logo_only': True,
+    'display_version': True,
+    'prev_next_buttons_location': 'bottom',
+    'style_external_links': False,
+    # Toc options
+    'collapse_navigation': True,
+    'sticky_navigation': True,
+    'navigation_depth': 4,
+    'includehidden': True,
+    'titles_only': False,
+}
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+
+html_sidebars = {
+    '**': [
+        'about.html',
+        'navigation.html',
+        'relations.html',
+        'searchbox.html',
+    ]
+}
 
 

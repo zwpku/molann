@@ -1,8 +1,25 @@
+r"""Features of Molecuar System --- :mod:`molann.feature`
+==========================================================
+
+:Author: Wei Zhang
+:Year: 2022
+:Copyright: GNU Public License v3
+
+Classes
+-------
+.. autoclass:: Feature
+    :members:
+
+.. autoclass:: FeatureFileReader
+    :members:
+
+"""
+
 import torch
 import pandas as pd
 
 class Feature(object):
-    """Feature information 
+    r"""Feature information 
 
     Parameters
     ----------
@@ -12,6 +29,34 @@ class Feature(object):
         type of feature. Currently supported value ares: 'angle', 'bond', 'dihedral', and 'position'
     atom_group : AtomGroup
         AtomGroup. Atoms used in defining a feature 
+
+    Attributes
+    ----------
+    name : str
+    type : int
+
+
+    Note
+    ----
+    :math:`D`
+
+    .. math::
+
+       \frac{30}{\mathbb{E}}
+
+    Returns
+    -------
+    a : int
+
+    Example
+    -------
+
+    >>> f = Feature(fname, ftype, ag)
+    >>> exit(0)
+
+    .. code-block:: python
+    
+        import os
 
     """
 
