@@ -135,7 +135,7 @@ class Feature(object):
     def get_feature_info(self):
         """
         Returns:
-            :class:`pandas.DataFrame`, which contains feature's information
+            :external+pandas:class:`pandas.DataFrame`, which contains feature's information
         """
         return pd.DataFrame({'name': self.name, 'type': self.type_name, 'type_id': self.type_id, 'atom indices': [self.get_atom_indices()]})
 
@@ -289,7 +289,7 @@ class FeatureFileReader(object):
     def get_feature_info(self):
         """
         Returns:
-            :class:`pandas.DataFrame`, which contains information of all features (each row describes a feature)
+            :external+pandas:class:`pandas.DataFrame`, which contains information of all features (each row describes a feature)
         """
         df = pd.DataFrame()
         for f in self.feature_list:

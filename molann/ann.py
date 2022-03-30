@@ -280,13 +280,55 @@ class FeatureMap(torch.nn.Module):
         return ret 
 
 class FeatureLayer(torch.nn.Module):
-    """
-    ANN layer that map coordinates to all features
+    r""" ANN layer that maps coordinates to all features
+
+    Args:
+        feature_list (list of :class:`molann.feature.Feature`): list of features 
+        use_angle_value (boolean): whether to use angle value in radians 
+
+    This class encapsulates :class:`FeatureMap` and maps coordinates to multiple features.
+
+    Raises:
+        AssertionError: if feature_list is empty.
+
+    Example:
+
+    .. code-block:: python
+
+        import MDAnalysis as mda
+        from molann.ann import FeatureLayer
+        from molann.feature import Feature
+
+        # pdb file of the system
+        pdb_filename = '/path/to/system.pdb'
+        ref = mda.Universe(pdb_filename) 
+
+        f1 = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
+        f2 = Feature('name', 'angle', ref.select_atoms('bynum 1 3 2'))
+        f3 = Feature('name', 'bond', ref.select_atoms('bynum 1 3'))
+
+        # define feature layer using features f1, f2 and f3
+        f_layer = FeatureLayer([f1, f3, f2], use_angle_value=False)
+
+        print ('output dim=', f_layer.output_dimension())
+        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        print (f_layer(x))
+        ff = f_layer.get_feature(0)
+        print (f_layer.get_feature_info())
+
+        feature_layer_model_name = 'feature_layer.pt'
+        torch.jit.script(f_layer).save(feature_layer_model_name)
+
+    The following code defines an identity feature layer.
+
+    .. code-block:: python
+
+        f4 = Feature('identity', 'position', ref.atoms)
+        identity_f_layer = FeatureLayer([f4], use_angle_value=False)
     """
 
     def __init__(self, feature_list, use_angle_value=False):
         """
-        TBA
         """
         super(FeatureLayer, self).__init__()
 
@@ -297,6 +339,9 @@ class FeatureLayer(torch.nn.Module):
 
     def get_feature_info(self):
         r"""display information of features 
+
+        Returns:
+            :external+pandas:class:`pandas.DataFrame`, information of features
         """
         df = pd.DataFrame()
         for f in self.feature_list:
@@ -304,22 +349,34 @@ class FeatureLayer(torch.nn.Module):
         return df
 
     def get_feature(self, idx):
-        r"""return the name of feature 
-
-        Parameters
-        ----------
-        idx : int
-            index of feature
+        r"""
+        Args: 
+            idx (int): index of feature in feature list
+        Returns:
+             :class:`molann.feature.Feature`, the feature in the feature list
         """
         return self.feature_list[idx]
 
     def output_dimension(self):
-        r"""return total dimension of features
+        r"""
+        Returns: 
+            int, total dimension of features in the feature list, or, equivalently,
+            the dimension of the output layer of ANN
         """
         return sum([f_map.dim() for f_map in self.feature_map_list])
 
     def forward(self, x):
         """forward map
+
+        Args:
+            x (:external+pytorch:class:`torch.Tensor`): 3d tensor that contains coordinates of states
+
+        Returns:
+            :external+pytorch:class:`torch.Tensor`, 2d tensor that contains all features (in the feature list) of states
+
+        This function simply calls :meth:`FeatureMap.forward` for each feature
+        in the feature list and then concatenates the tensors.
+            
         """
         xf_vec = [fmap(x) for fmap in self.feature_map_list]
         # Features are stored in columns 
@@ -327,12 +384,62 @@ class FeatureLayer(torch.nn.Module):
         return xf
 
 class PreprocessingANN(torch.nn.Module):
-    """Preprocessing ANN
+    """ANN that performs preprocessing of states 
+
+    Args:
+        align_layer (:class:`AlignmentLayer` or None): alignment layer 
+        feature_layer (:class:`FeatureLayer`): feature layer
+
+    Example:
+
+    .. code-block:: python
+
+        import MDAnalysis as mda
+        from molann.ann import FeatureLayer, PreprocessingANN
+        from molann.feature import Feature
+
+        # pdb file of the system
+        pdb_filename = '/path/to/system.pdb'
+        ref = mda.Universe(pdb_filename) 
+
+        ag=ref.select_atoms('bynum 1 2 3')
+
+        # define alignment layer
+        align = AlignmentLayer(ag)
+
+        # features are just positions of atoms 1,2 and 3.
+        f1 = Feature('name', 'position', ref.atoms)
+        f_layer = FeatureLayer([f1], use_angle_value=False)
+
+        # put together to get the preprocessing layer
+        pp_layer = PreprocessingANN(align, f_layer)
+
+        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        print (pp_layer(x))
+
+    When feature is both translation- and rotation-invariant, alignment is not neccessary:
+
+    .. code-block:: python
+
+        # define feature as dihedral angle 
+        f1 = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
+        f_layer = FeatureLayer([f1], use_angle_value=False)
+
+        # since feature is both translation- and rotation-invariant, alignment is not neccessary
+        pp_layer = PreprocessingANN(None, f_layer)
+
+    If only alignment is desired, one can provide an identity feature layer when defining :class:`PreprocessingANN`.
+
+    .. code-block:: python
+
+        f = Feature('identity', 'position', ref.atoms)
+        identity_f_layer = FeatureLayer([f], use_angle_value=False)
+        pp_layer = PreprocessingANN(align, identity_f_layer)
+
     """
     
     def __init__(self, align_layer, feature_layer):
         """
-        TBA
         """
 
         super(PreprocessingANN, self).__init__()
@@ -346,24 +453,64 @@ class PreprocessingANN(torch.nn.Module):
 
     def output_dimension(self):
         """
-        Return the dimension of the output layer
+        Return:
+            int, the dimension of the output layer
         """
         return self.feature_layer.output_dimension() 
 
-    def forward(self, inp):
+    def forward(self, x):
         """
-        forward map
+        forward map that aligns states and then maps to features 
+
+        Args:
+            x (:external+pytorch:class:`torch.Tensor`): 3d tensor that contains coordinates of states
+
+        Returns:
+            2d :external+pytorch:class:`torch.Tensor` 
+
         """
 
-        return self.feature_layer(self.align_layer(inp))
+        return self.feature_layer(self.align_layer(x))
 
 class MolANN(torch.nn.Module):
     """
-    ANN that incoorporates alignment and feature 
+    ANN that incoorporates preprocessing layer and the remaining layers which contains training parameters.
+
+    Args:
+        preprocessing_layer (:class:`PreprocessingANN`): preprocessing layer
+        ann_layers (:external+pytorch:class:`torch.nn.Module`): remaining layers
+
+
+    Example:
+
+    .. code-block:: python
+
+        import MDAnalysis as mda
+        from molann.ann import FeatureLayer, PreprocessingANN, MolANN
+        from molann.feature import Feature
+
+        # pdb file of the system
+        pdb_filename = '/path/to/system.pdb'
+        ref = mda.Universe(pdb_filename) 
+
+        f1 = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
+        f_layer = FeatureLayer([f1], use_angle_value=False)
+        pp_layer = PreprocessingANN(None, f_layer)
+
+        output_dim = pp_layer.output_dimension()
+
+        # neural networks layers which contains training parameters 
+        nn = create_sequential_nn([output_dim, 5, 3])
+
+        model = MolANN(pp_layer, nn)
+
+    Attributes:
+        preprocessing_layer (:class:`PreprocessingANN`)
+        ann_layers (:external+pytorch:class:`torch.nn.Module`)
+
     """
     def __init__(self, preprocessing_layer, ann_layers):
         """
-        TBA
         """
         super(MolANN, self).__init__()
         self.preprocessing_layer = preprocessing_layer
@@ -371,13 +518,14 @@ class MolANN(torch.nn.Module):
 
     def get_preprocessing_layer(self):
         """
-        return the preprocessing_layer 
+        Returns:
+            :class:`PreprocessingANN`, the preprocessing_layer 
         """
         return self.preprocessing_layer 
 
-    def forward(self, inp):
+    def forward(self, x):
         """
-        forward map
+        the forward map
         """
-        return self.ann_layers(self.preprocessing_layer(inp))
+        return self.ann_layers(self.preprocessing_layer(x))
 
