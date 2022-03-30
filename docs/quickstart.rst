@@ -6,7 +6,7 @@ Example 1: Define an ANN that includes alignment layer.
 .. code-block:: python
 
     import MDAnalysis as mda
-    from molann.ann import FeatureLayer, PreprocessingANN, MolANN, create_sequential_nn
+    from molann.ann import AlignmentLayer, FeatureLayer, PreprocessingANN, MolANN, create_sequential_nn
     from molann.feature import Feature
 
     # pdb file of the system

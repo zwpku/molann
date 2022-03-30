@@ -64,11 +64,13 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     return torch.nn.Sequential(*layers)
 
 class AlignmentLayer(torch.nn.Module):
-    """ ANN layer that performs alignment based on Kabsch algorithm 
+    """ ANN layer that performs alignment based on `Kabsch algorithm <http://en.wikipedia.org/wiki/kabsch_algorithm>`__
 
     Args:
         align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): atom
-                    group. Specifies coordinates of reference atoms to perform alignment. 
+                    group. Specifies coordinates of reference atoms that are used to perform alignment. 
+
+    Note that the coordinates of reference atoms will be shifted (to have zero mean) before they are used.
 
     Example:
 
@@ -168,6 +170,7 @@ class FeatureMap(torch.nn.Module):
         import MDAnalysis as mda
         from molann.ann import FeatureMap
         from molann.feature import Feature
+        import torch
 
         # pdb file of the system
         pdb_filename = '/path/to/system.pdb'
@@ -298,6 +301,7 @@ class FeatureLayer(torch.nn.Module):
         import MDAnalysis as mda
         from molann.ann import FeatureLayer
         from molann.feature import Feature
+        import torch
 
         # pdb file of the system
         pdb_filename = '/path/to/system.pdb'
@@ -397,6 +401,7 @@ class PreprocessingANN(torch.nn.Module):
         import MDAnalysis as mda
         from molann.ann import FeatureLayer, PreprocessingANN
         from molann.feature import Feature
+        import torch
 
         # pdb file of the system
         pdb_filename = '/path/to/system.pdb'
@@ -408,7 +413,7 @@ class PreprocessingANN(torch.nn.Module):
         align = AlignmentLayer(ag)
 
         # features are just positions of atoms 1,2 and 3.
-        f1 = Feature('name', 'position', ref.atoms)
+        f1 = Feature('name', 'position', ag)
         f_layer = FeatureLayer([f1], use_angle_value=False)
 
         # put together to get the preprocessing layer
@@ -486,7 +491,7 @@ class MolANN(torch.nn.Module):
     .. code-block:: python
 
         import MDAnalysis as mda
-        from molann.ann import FeatureLayer, PreprocessingANN, MolANN
+        from molann.ann import FeatureLayer, PreprocessingANN, MolANN, create_sequential_nn
         from molann.feature import Feature
 
         # pdb file of the system
