@@ -32,9 +32,7 @@ class Feature(object):
 
     .. note::
 
-        When `feature_type` ='angle', then :`atom_group` must contain 3 atoms; 
-        when `feature_type` ='bond', then `atom_group` must contain 2 atoms; 
-        when `feature_type` ='dihedral', then `atom_group` must contain 4 atoms. 
+        For `feature_type` = 'angle', 'bond', and 'dihedral',  `atom_group` must contain 3 atoms, 2 atoms, and 4 atoms, respectively. 
 
     Example
     -------
@@ -43,7 +41,7 @@ class Feature(object):
 
         # package MDAnalysis is required
         import MDAnalysis as mda
-        from feature import Feature 
+        from molann.feature import Feature 
 
         # pdb file of the system
         pdb_filename = '/path/to/system.pdb'
@@ -143,15 +141,85 @@ class Feature(object):
 class FeatureFileReader(object):
     r"""Read features from file
 
-    Parameters
-    ----------
-    feature_file : str
-        name of the feature file
-    """
+    :param str feature_file: name of the feature file
+    :param str section_name: name of the section in the file from which to read features
+    :param universe: universe that defines the system
+    :type universe: :external+mdanalysis:class:`MDAnalysis.core.universe.Universe`
+
+    .. note::
+
+        A feature file is a normal text file. 
+
+        Each section describes a list of features.
+        The begining of a section is marked by a line with content '[section_name]', and its end is marked by a line with
+        content '[End]'. :meth:`read` constructs a list of :class:`Feature` from the section with
+        the corresponding section_name.
+
+        Lines that describe a feature contain several fields, seperated by
+        comma. The first and the second fields specify the `name` and the
+        `type_name` of the feature, respectively. The remaining fields specify
+        the strings for selection  to define an atom group (by concatenation). See :external+mdanalysis:mod:`MDAnalysis.core.selection`.
+
+        Lines starting with '#' are comment lines and they are not processed. 
+
+    Example
+    -------
+
+       Below is an example of feature file, named as *feature.txt*.
+
+    .. code-block:: text
+
+        # This is a comment line. 
+
+        # Lines that describe a feature contain several fields, seperated by comma. 
+
+        # The first and the second fields specify the name and the
+        # type_name of the feature, respectively. The remaining fields specify
+        # the strings for selection to define an atom group by concatenation.
+
+        # Note: to keep the order of atoms, use 'bynum 5, bynum 2', instead of 'bynum 5 2'
+
+        [Preprocessing]
+        #position, type C or type O or type N
+        p1, position, resid 2 
+        [End]
+        [Histogram]
+        d1, dihedral, bynum 5, bynum 7, bynum 9, bynum 15 
+        d2, dihedral, bynum 7, bynum 9, bynum 15, bynum 17
+        b1, bond, bynum 2 5
+        b2, bond, bynum 5 6
+        a1, angle, bynum 20, bynum 19, bynum 21
+        a2, angle, bynum 16, bynum 15, bynum 17
+        [End]
+        [Output]
+        d1, dihedral, bynum 5 7 9 15 
+        d2, dihedral, bynum 7 9 15 17
+        [End]
+
+    The following code constructs a list of features from the section
+    'Histogram', and a list of features from section 'Preprocessing'.
+
+    .. code-block:: python
+
+        # package MDAnalysis is required
+        import MDAnalysis as mda
+        from molann.feature import FeatureFileReader
+
+        # pdb file of the system
+        pdb_filename = '/path/to/system.pdb'
+        ref = mda.Universe(pdb_filename) 
+
+        # read features from the section 'Histogram' 
+        feature_reader = FeatureFileReader('feature.txt', 'Histogram', ref)
+        feature_list_1 = feature_reader.read()
+
+        # read features from the section 'Preprocessing'
+        feature_reader = FeatureFileReader('feature.txt', 'Preprocessing', ref)
+        feature_list_2 = feature_reader.read()
+
+     """
 
     def __init__(self, feature_file, section_name, universe):
-        """ init
-        """
 
         self.feature_file = feature_file
         self.section_name = section_name
@@ -160,6 +228,9 @@ class FeatureFileReader(object):
     def read(self):
         """
         read features from file
+
+        :return: a list of features constructed from the feature file
+        :rtype: list of :class:`Feature`
         """
 
         self.feature_list = []
@@ -202,17 +273,23 @@ class FeatureFileReader(object):
         return self.feature_list
 
     def get_feature_list(self):
-        """return list of features 
+        """
+        :return: feature list constructed by calling :meth:`read` 
+        :rtype: list of :class:`Feature`
         """
         return self.feature_list
 
     def get_num_of_features(self):
-        """return number of features
+        """
+        :return: number of features in the feature list 
+        :rtype: int 
         """
         return len(self.feature_list)
 
     def get_feature_info(self):
-        """return a pandas DataFrame including information of all features
+        """
+        :return: information of all features (each row describes a feature)
+        :rtype: pandas.DataFrame
         """
         df = pd.DataFrame()
         for f in self.feature_list:
