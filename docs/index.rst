@@ -6,9 +6,6 @@
 Welcome to molann's documentation
 ==================================
 
-.. note::
-   This project is under development.
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents:

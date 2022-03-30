@@ -5,6 +5,10 @@ r"""Artificial Neural networks for Molecular System --- :mod:`molann.ann`
 :Year: 2022
 :Copyright: GNU Public License v3
 
+This module implements several PyTorch artificial neural network (ANN)
+classes, i.e. derived classes of :external+pytorch:class:`torch.nn.Module`, 
+which take into acount alignment, as well as features of molecular system.
+
 Classes
 -------
 .. autoclass:: AlignmentLayer
@@ -22,16 +26,34 @@ Classes
 .. autoclass:: MolANN
     :members:
 
-"""
+.. autofunction:: create_sequential_nn
 
+"""
 
 import torch
 import pandas as pd
 
 def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
+    r""" Construct a feedforward Pytorch neural network
+
+    :param layer_dims: dimensions of layers 
+    :type layer_dims: list of int
+    :param activation: PyTorch non-linear activation function
+
+    :raises AssertionError: if length of **layer_dims** is not larger than 1.
+
+    Example
+    -------
+
+    .. code-block:: python
+
+        from molann.ann import create_sequential_nn
+        import torch
+
+        nn1 = create_sequential_nn([10, 5, 1])
+        nn2 = create_sequential_nn([10, 2], activation=torch.nn.ReLU())
     """
-    TBA
-    """
+
     assert len(layer_dims) >= 2, 'Error: at least 2 layers are needed to define a neural network (length={})!'.format(len(layer_dims))
     layers = []
     for i in range(len(layer_dims)-2) :
@@ -42,12 +64,39 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     return torch.nn.Sequential(*layers)
 
 class AlignmentLayer(torch.nn.Module):
-    """ ANN Layer that performs alignment 
+    """ ANN layer that performs alignment based on Kabsch algorithm 
+
+    Args:
+        align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): atom
+                    group. Specifies coordinates of reference atoms to perform alignment. 
+
+    Example:
+
+    .. code-block:: python
+
+        import torch
+        import MDAnalysis as mda
+        from molann.ann import AlignmentLayer
+
+        # pdb file of the system
+        pdb_filename = '/path/to/system.pdb'
+        ref = mda.Universe(pdb_filename) 
+        ag=ref.select_atoms('bynum 1 2 3')
+
+        align = AlignmentLayer(ag)
+        align.show_info()
+
+        # for illustration, use the state in the pdb file (length 1)
+        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        print (align(x))
+
+        # save the model to file
+        align_model_name = 'algin.pt'
+        torch.jit.script(align).save(align_model_name)
     """
 
     def __init__(self, align_atom_group):
         """
-        TBA
         """
 
         super(AlignmentLayer, self).__init__()
@@ -60,17 +109,29 @@ class AlignmentLayer(torch.nn.Module):
 
     def show_info(self):
         """
-        TBA
+        display indices and positions of reference atoms that are used to perform alignment
         """
         print ('\natom indices used for alignment: \n', self.align_atom_indices.numpy())
         print ('\npositions of reference state used in aligment:\n', self.ref_x.numpy())
 
-    def forward(self, traj):  
+    def forward(self, x):  
         """
-        align trajectory by translation and rotation
+        align states by translation and rotation. 
+
+        Args: 
+            x (:external+pytorch:class:`torch.Tensor`): states to be aligned
+
+        Returns:
+            :external+pytorch:class:`torch.Tensor` that stores the aligned states
+
+        **x** should be a 3d tensor, whose shape is :math:`[l, N, 3]`,
+        where :math:`l` is the number of states in **x** and :math:`N` is the total number of atoms in the system.
+        The returned tensor has the same shape.
+
+        This method implements the Kabsch algorithm.
         """
                          
-        traj_selected_atoms = traj[:, self.align_atom_indices, :]
+        traj_selected_atoms = x[:, self.align_atom_indices, :]
         # centers
         x_c = torch.mean(traj_selected_atoms, 1, True)
         # translation
@@ -80,24 +141,51 @@ class AlignmentLayer(torch.nn.Module):
         prod = torch.matmul(xtmp, self.ref_x) # dimension: traj_length x 3 x 3
         u, s, vh = torch.linalg.svd(prod)
 
-        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(traj.size(0), 1, 1)
+        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(x.size(0), 1, 1)
 
         sign_vec = torch.sign(torch.linalg.det(torch.matmul(u, vh))).detach()
         diag_mat[:,2,2] = sign_vec
 
         rotate_mat = torch.bmm(torch.bmm(u, diag_mat), vh)
 
-        aligned_traj = torch.matmul(traj-x_c, rotate_mat) 
+        aligned_x = torch.matmul(x-x_c, rotate_mat) 
                 
-        return aligned_traj     
+        return aligned_x
 
 class FeatureMap(torch.nn.Module):
     """ANN that maps coordinates to a feature 
+
+    Args:
+        feature (:class:`molann.feature.Feature`): feature that defines the map
+        use_angle_value (boolean): if true, use angle value in radians, else
+            use sine and/or cosine values. It does not play a role if the
+            type of **feature** is 'position'.
+
+    Example:
+
+    .. code-block:: python
+
+        import MDAnalysis as mda
+        from molann.ann import FeatureMap
+        from molann.feature import Feature
+
+        # pdb file of the system
+        pdb_filename = '/path/to/system.pdb'
+        ref = mda.Universe(pdb_filename) 
+
+        f = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
+        fmap = FeatureMap(f, use_angle_value=False)
+        print ('dim=', fmap.dim())
+
+        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        print (fmap(x))
+        feature_model_name = 'feature_map.pt'
+        torch.jit.script(fmap).save(feature_model_name)
+
     """
 
     def __init__(self, feature, use_angle_value=False):
         """
-        TBA
         """
         super(FeatureMap, self).__init__()
         self.feature = feature
@@ -106,7 +194,17 @@ class FeatureMap(torch.nn.Module):
         self.use_angle_value = use_angle_value
 
     def dim(self):
-        r"""return total dimension of features
+        r"""
+        Return: 
+            int, total dimension of features or, equivalently, the dimension of the output layer of the ANN.
+
+        The dimension equals 1 for 'angle' and 'bond', as well as for
+        'dihedral' when **use_angle_value** =True.
+
+        The dimension equals 2 for 'dihedral', when **use_angle_value** =False.
+
+        The dimension equals :math:`3\times n` for 'position', where :math:`n`
+        is the number of atoms involved in **feature** .
         """
         output_dim = 0
         if self.type_id == 0 or self.type_id == 1 : # angle or bond
@@ -123,10 +221,22 @@ class FeatureMap(torch.nn.Module):
     def forward(self, x):
         r"""map position to feature 
 
-        Parameters
-        ----------
-        x : torch tensor 
-            coordinates of state
+        Args:
+            x (:external+pytorch:class:`torch.Tensor`): 3d tensor that contains coordinates of states
+
+        Returns:
+            :external+pytorch:class:`torch.Tensor`, 2d tensor that contains features of the states
+
+        The shape of the return tensor is :math:`[l, d]`, where :math:`l` is
+        the number of states in **x** and :math:`d` is the dimension returned by :meth:`dim`.
+
+        For 'angle', if use_angle_value=True, it returns angle values in
+        :math:`[0, \pi]`; otherwise, it retuns the cosine values of the angles.  
+
+        For 'dihedral', if use_angle_value=True, it returns angle values in
+        :math:`[-\pi, \pi]`; otherwise, it retuns [cosine, sine] of the angles.  
+
+        For 'position', it returns the coordinates of all the atoms in the feature.
 
         """
 

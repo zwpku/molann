@@ -30,12 +30,14 @@ class Feature(object):
     :param atom_group: atom group used to define a feature 
     :type atom_group: :external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`
 
-    .. note::
+    :raises AssertionError: if the number of atoms in **atom_group** does not match **feature_type**.
 
-        For `feature_type` = 'angle', 'bond', and 'dihedral',  `atom_group` must contain 3 atoms, 2 atoms, and 4 atoms, respectively. 
 
-    Example
-    -------
+    Note:
+
+        For **feature_type** = 'angle', 'bond', and 'dihedral', **atom_group** must contain 3 atoms, 2 atoms, and 4 atoms, respectively. 
+
+    Examples:
 
     .. code-block:: python
 
@@ -57,7 +59,7 @@ class Feature(object):
         # coordinates of atoms whose ids are 3 and 4.
         f4 = Feature('some name', 'position', ref.select_atoms('bynum 3 5'))
 
-    .. note::
+    Note:
         :external+mdanalysis:meth:`MDAnalysis.core.universe.Universe.select_atoms()` returns an atom group that does not preserve the orders of atoms.
         To construct a feature that is the dihedral angle formed by atoms whose ids
         are 2,1,3, and 4, we can define the atom group by concatenation:
@@ -67,14 +69,13 @@ class Feature(object):
             ag = ref.select_atoms('bynum 2') + ref.select_atoms('bynum 1') + ref.select_atoms('bynum 3 and 4')  
             f = Feature('some name', 'dihedral', ag)
 
-    Attributes
-    ----------
-    name : str
-        feature name
-    type_name : str
-        feature type: 'angle', 'bond', 'dihedral', or 'position'
-    type_id : int
-        0 for 'angle'; 1 for 'bond'; 2 for 'dihedral'; 3 for 'position'
+    Attributes:
+        name: string that indicates the name of feature
+        type_name : string whose value is among 'angle', 'bond', 'dihedral', or 'position'
+
+        type_id : integer, 0 if type_name='angle', 1 if type_name='bond', 2 if type_name='dihedral', 3 if type_name='position'
+
+        atom_group : :external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup` used to define the feature
 
     """
 
@@ -105,36 +106,36 @@ class Feature(object):
 
     def get_name(self):
         """
-        :returns: :attr:`name`
-        :rtype: str
+        Returns:
+            :attr:`name`
         """
         return self.name
 
     def get_type(self):
         """
-        :return: :attr:`type_name`
-        :rtype:  str
+        Returns:
+            :attr:`type_name`
         """
         return self.type_name
 
     def get_atom_indices(self):
         """
-        :rtype:  list of int
-        :return: indices of atoms in the atom group. The indices start from 1.
+        Returns:
+            list of int, indices of atoms in the atom group. The indices start from 1.
         """
         return self.atom_group.ids
 
     def get_type_id(self):
         """
-        :return: :attr:`type_id`
-        :rtype: int
+        Returns:
+            :attr:`type_id`
         """
         return self.type_id
 
     def get_feature_info(self):
         """
-        :return: feature's information
-        :rtype: :class:`pandas.DataFrame`  
+        Returns:
+            :class:`pandas.DataFrame`, which contains feature's information
         """
         return pd.DataFrame({'name': self.name, 'type': self.type_name, 'type_id': self.type_id, 'atom indices': [self.get_atom_indices()]})
 
@@ -146,7 +147,7 @@ class FeatureFileReader(object):
     :param universe: universe that defines the system
     :type universe: :external+mdanalysis:class:`MDAnalysis.core.universe.Universe`
 
-    .. note::
+    Note:
 
         A feature file is a normal text file. 
 
@@ -162,8 +163,7 @@ class FeatureFileReader(object):
 
         Lines starting with '#' are comment lines and they are not processed. 
 
-    Example
-    -------
+    Examples:
 
        Below is an example of feature file, named as *feature.txt*.
 
@@ -196,8 +196,7 @@ class FeatureFileReader(object):
         d2, dihedral, bynum 7 9 15 17
         [End]
 
-    The following code constructs a list of features from the section
-    'Histogram', and a list of features from section 'Preprocessing'.
+    The following code constructs a list of features from the section 'Histogram', and a list of features from section 'Preprocessing'.
 
     .. code-block:: python
 
@@ -229,8 +228,9 @@ class FeatureFileReader(object):
         """
         read features from file
 
-        :return: a list of features constructed from the feature file
-        :rtype: list of :class:`Feature`
+        Returns:
+
+            list of :class:`Feature`, a list of features constructed from the feature file
         """
 
         self.feature_list = []
@@ -274,22 +274,22 @@ class FeatureFileReader(object):
 
     def get_feature_list(self):
         """
-        :return: feature list constructed by calling :meth:`read` 
-        :rtype: list of :class:`Feature`
+        Returns:
+            list of :class:`Feature`, feature list constructed by calling :meth:`read` 
         """
         return self.feature_list
 
     def get_num_of_features(self):
         """
-        :return: number of features in the feature list 
-        :rtype: int 
+        Returns:
+            int, number of features in the feature list 
         """
         return len(self.feature_list)
 
     def get_feature_info(self):
         """
-        :return: information of all features (each row describes a feature)
-        :rtype: pandas.DataFrame
+        Returns:
+            :class:`pandas.DataFrame`, which contains information of all features (each row describes a feature)
         """
         df = pd.DataFrame()
         for f in self.feature_list:
