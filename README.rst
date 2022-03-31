@@ -14,7 +14,7 @@ The package can be installed via `pip`:
 
    pip install molann
 
-The installation from source is described in the `Installation`_
+The installation from source is described in the `Installation`_ page.
 
 Simple example 
 ==============
@@ -44,7 +44,7 @@ Simple example
     model = MolANN(pp_layer, nn)
     torch.jit.script(model).save('model.pt')
 
-More examples for each classes can be found in the `MolANN docs`_
+More examples for each class can be found in the `MolANN docs`_ .
 
 Documentataion
 ==============
