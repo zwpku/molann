@@ -39,7 +39,7 @@ The following code defines an ANN as a function of a bond distance and a dihedra
     pp_layer = PreprocessingANN(None, f_layer)
 
     output_dim = pp_layer.output_dimension()
-    # neural networks layers which contains training parameters 
+    # neural networks layers which contain training parameters 
     nn = create_sequential_nn([output_dim, 5, 3])
 
     model = MolANN(pp_layer, nn)
