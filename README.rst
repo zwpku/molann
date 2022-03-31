@@ -19,7 +19,7 @@ The installation from source is described in the `Installation`_ page.
 Simple example 
 ==============
 
-The follow code defines an ANN as a function of a bond distance and a dihedral angle.
+The following code defines an ANN as a function of a bond distance and a dihedral angle.
 
 .. code-block:: python
 
