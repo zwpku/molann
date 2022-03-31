@@ -11,10 +11,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 if __name__ == '__main__':
     setuptools.setup(
         name="molann",
-        version="0.0.9",
+        version="1.0.0",
         author="Wei Zhang",
         author_email="wzhangpku@gmail.com",
-        description="Find collective variables of molecular systems by training deep neural networks",
+        description="Artificial Neural Networks (ANNs) for Molecular Systems",
         long_description=long_description,
         long_description_content_type="text/markdown",
         url="https://github.com/zwpku/molann",
