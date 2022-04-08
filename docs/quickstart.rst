@@ -56,7 +56,7 @@ Example 2: Define an ANN as a function of a bond distance and a dihedral angle.
     pp_layer = PreprocessingANN(None, f_layer)
 
     output_dim = pp_layer.output_dimension()
-    # define neural network layers which contains training parameters 
+    # define neural network layers that contain training parameters 
     nn = create_sequential_nn([output_dim, 5, 3])
 
     # define the final network
