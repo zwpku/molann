@@ -5,18 +5,18 @@
 import setuptools
 import os
 
-with open("README.md", "r", encoding="utf-8") as fh:
+with open("README.rst", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 if __name__ == '__main__':
     setuptools.setup(
         name="molann",
-        version="1.0.0",
+        version="1.0.2",
         author="Wei Zhang",
         author_email="wzhangpku@gmail.com",
-        description="Artificial Neural Networks (ANNs) for Molecular Systems",
+        description="PyTorch Artificial Neural Networks (ANNs) for Molecular Systems",
         long_description=long_description,
-        long_description_content_type="text/markdown",
+        long_description_content_type="text/x-rst",
         url="https://github.com/zwpku/molann",
         project_urls={
 #        "Bug Tracker": "https://github.com/pypa/sampleproject/issues",
