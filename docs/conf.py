@@ -45,8 +45,8 @@ intersphinx_mapping = {'mdanalysis': ('https://docs.mdanalysis.org/stable', None
                        'pandas': ('https://pandas.pydata.org/docs/', None)
                       }
 
-mathjax_path = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML'
-
+#mathjax_path = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML'
+mathjax_path = 'https://cdn.jsdelivr.net/npm/mathjax@2/MathJax.js?config=TeX-AMS-MML_HTMLorMML'
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'default'
 

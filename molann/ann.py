@@ -11,6 +11,7 @@ which take into acount alignment, as well as features of molecular system.
 
 Classes
 -------
+
 .. autoclass:: AlignmentLayer
     :members:
 
@@ -64,13 +65,26 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     return torch.nn.Sequential(*layers)
 
 class AlignmentLayer(torch.nn.Module):
-    """ ANN layer that performs alignment based on `Kabsch algorithm <http://en.wikipedia.org/wiki/kabsch_algorithm>`__
+    r"""ANN layer that performs alignment based on `Kabsch algorithm <http://en.wikipedia.org/wiki/kabsch_algorithm>`__
 
     Args:
         align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): atom
                     group. Specifies coordinates of reference atoms that are used to perform alignment. 
 
-    Note that the coordinates of reference atoms will be shifted (to have zero mean) before they are used.
+
+    Let :math:`x_{ref}\in \mathbb{R}^{n_r\times 3}` be the coordinates of the
+    reference atoms, where :math:`n_r` is the number of atoms in the atom group. Then, this class defines the map
+
+
+    .. math::
+
+        x \in \mathbb{R}^{n \times 3} \longrightarrow (x-c(x))A(x) \in \mathbb{R}^{n \times 3}\,,
+
+    where, given a state :math:`x`, :math:`A(x)\in \mathbb{R}^{3\times 3}` and
+    :math:`c(x)\in \mathbb{R}^{n\times 3}` are respectively the optimal
+    rotation and translation determined (with respect to :math:`x_{ref}`) using the Kabsch algorithm.
+
+    Note that :math:`x_{ref}` will be shifted to have zero mean before it is used to align states.
 
     Example:
 
@@ -155,13 +169,21 @@ class AlignmentLayer(torch.nn.Module):
         return aligned_x
 
 class FeatureMap(torch.nn.Module):
-    """ANN that maps coordinates to a feature 
+    r"""ANN that maps coordinates to a feature 
 
     Args:
         feature (:class:`molann.feature.Feature`): feature that defines the map
         use_angle_value (boolean): if true, use angle value in radians, else
             use sine and/or cosine values. It does not play a role if the
             type of **feature** is 'position'.
+
+    This class defines the feature map
+
+    .. math::
+
+       f: x \in \mathbb{R}^{n \times 3} \longrightarrow f(x) \in \mathbb{R}^{d}\,,
+
+    corresponding to the input feature. 
 
     Example:
 
@@ -290,6 +312,14 @@ class FeatureLayer(torch.nn.Module):
         use_angle_value (boolean): whether to use angle value in radians 
 
     This class encapsulates :class:`FeatureMap` and maps coordinates to multiple features.
+    More concretely, it defines the map
+
+    .. math::
+
+       x \in \mathbb{R}^{n \times 3} \longrightarrow (f_1(x), f_2(x), \dots, f_l(x))\,,
+
+    where :math:`l` is the number of features in the feature list, and each
+    :math:`f_i` is the feature map defined by the class :class:`FeatureMap`.
 
     Raises:
         AssertionError: if feature_list is empty.

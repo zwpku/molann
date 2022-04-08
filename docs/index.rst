@@ -3,12 +3,14 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to molann's documentation
+Welcome to MolANN's documentation
 ==================================
+
+This package implements PyTorch artificial neural network classes that allow to define neural network functions that take into account alignment, or functions that depend on molecular features (bonds, angles, etc.). 
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Contents
 
    installation
    quickstart
