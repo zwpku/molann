@@ -265,11 +265,6 @@ class FeatureFileReader(object):
 
         pp_cfg_file.close()
 
-        if len(self.feature_list) == 0 : 
-           print ("Warning: no feature found! \n") 
-        else :
-           print ("\n{} features loaded\n".format(len(self.feature_list)) )
-
         return self.feature_list
 
     def get_feature_list(self):
