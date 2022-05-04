@@ -116,12 +116,15 @@ class AlignmentLayer(torch.nn.Module):
         """
 
         super(AlignmentLayer, self).__init__()
-        self.align_atom_indices = torch.tensor(align_atom_group.ids - 1).long() # minus one, such that the index starts from 0
-        self.ref_x = torch.from_numpy(align_atom_group.positions)        
 
+        self.register_buffer('align_atom_indices', torch.tensor(align_atom_group.ids - 1)) # minus one, such that the index starts from 0
+
+        ref_x = torch.from_numpy(align_atom_group.positions)        
         # shift reference state 
-        ref_c = torch.mean(self.ref_x, 0) 
-        self.ref_x = self.ref_x - ref_c
+        ref_c = torch.mean(ref_x, 0) 
+        ref_x = ref_x - ref_c
+
+        self.register_buffer('ref_x', ref_x)
 
     def show_info(self):
         """
@@ -214,9 +217,10 @@ class FeatureMap(torch.nn.Module):
         """
         super(FeatureMap, self).__init__()
         self.feature = feature
-        self.type_id = feature.get_type_id() 
-        self.atom_indices = torch.tensor(feature.get_atom_indices()-1)  # minus one, so that it starts from 0
+        self.type_id = feature.get_type_id()
         self.use_angle_value = use_angle_value
+
+        self.register_buffer('atom_indices', torch.tensor(feature.get_atom_indices()-1))
 
     def dim(self):
         r"""
