@@ -160,7 +160,7 @@ class AlignmentLayer(torch.nn.Module):
         prod = torch.matmul(xtmp, self.ref_x) # dimension: traj_length x 3 x 3
         u, s, vh = torch.linalg.svd(prod)
 
-        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(x.size(0), 1, 1)
+        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)
 
         sign_vec = torch.sign(torch.linalg.det(torch.matmul(u, vh))).detach()
         diag_mat[:,2,2] = sign_vec
