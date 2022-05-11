@@ -56,13 +56,15 @@ def create_sequential_nn(layer_dims, activation=torch.nn.Tanh()):
     """
 
     assert len(layer_dims) >= 2, 'Error: at least 2 layers are needed to define a neural network (length={})!'.format(len(layer_dims))
-    layers = []
-    for i in range(len(layer_dims)-2) :
-        layers.append(torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
-        layers.append(activation)
-    layers.append(torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
 
-    return torch.nn.Sequential(*layers)
+    layers = torch.nn.Sequential()
+
+    for i in range(len(layer_dims)-2) :
+        layers.add_module('%dth_layer' % (i+1), torch.nn.Linear(layer_dims[i], layer_dims[i+1])) 
+        layers.add_module('activation of %dth_layer' % (i+1), activation)
+    layers.add_module('%dth_layer' % (len(layer_dims)-1), torch.nn.Linear(layer_dims[-2], layer_dims[-1])) 
+
+    return layers
 
 class AlignmentLayer(torch.nn.Module):
     r"""ANN layer that performs alignment based on `Kabsch algorithm <http://en.wikipedia.org/wiki/kabsch_algorithm>`__
