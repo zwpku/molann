@@ -70,23 +70,21 @@ class AlignmentLayer(torch.nn.Module):
     r"""ANN layer that performs alignment based on `Kabsch algorithm <http://en.wikipedia.org/wiki/kabsch_algorithm>`__
 
     Args:
-        align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): atom
-                    group. Specifies coordinates of reference atoms that are used to perform alignment. 
+        align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies coordinates of reference atoms that are used to perform alignment. 
+        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies those atoms that are used as input. 
 
 
     Let :math:`x_{ref}\in \mathbb{R}^{n_r\times 3}` be the coordinates of the
-    reference atoms, where :math:`n_r` is the number of atoms in the atom group. Then, this class defines the map
-
+    reference atoms, where :math:`n_r` is the number of atoms in the atom group `align_atom_group`. Then, this class defines the map
 
     .. math::
 
-        x \in \mathbb{R}^{n \times 3} \longrightarrow (x-c(x))A(x) \in \mathbb{R}^{n \times 3}\,,
+        x \in \mathbb{R}^{n_{inp} \times 3} \longrightarrow (x-c(x))A(x) \in \mathbb{R}^{n_{inp} \times 3}\,,
 
-    where, given a state :math:`x`, :math:`A(x)\in \mathbb{R}^{3\times 3}` and
-    :math:`c(x)\in \mathbb{R}^{n\times 3}` are respectively the optimal
-    rotation and translation determined (with respect to :math:`x_{ref}`) using the Kabsch algorithm.
+    where, given coordinates :math:`x` of :math:`n_{inp}` atoms, :math:`A(x)\in \mathbb{R}^{3\times 3}` and :math:`c(x)\in \mathbb{R}^{n_{inp}\times 3}` are respectively the optimal rotation and translation determined (with respect to :math:`x_{ref}`) using the Kabsch algorithm.
 
     Note that :math:`x_{ref}` will be shifted to have zero mean before it is used to align states.
+
 
     Example:
 
@@ -99,9 +97,10 @@ class AlignmentLayer(torch.nn.Module):
         # pdb file of the system
         pdb_filename = '/path/to/system.pdb'
         ref = mda.Universe(pdb_filename) 
-        ag=ref.select_atoms('bynum 1 2 3')
+        ag=ref.select_atoms('bynum 1 2 5')
+        input_ag = ref.atoms
 
-        align = AlignmentLayer(ag)
+        align = AlignmentLayer(ag, input_ag)
         align.show_info()
 
         # for illustration, use the state in the pdb file (length 1)
@@ -111,28 +110,45 @@ class AlignmentLayer(torch.nn.Module):
         # save the model to file
         align_model_name = 'algin.pt'
         torch.jit.script(align).save(align_model_name)
+
+
+    Attributes:
+        align_atom_indices (list of int): indices of atoms used to align coordinates.
+        input_atom_indices (list of int): indices of atoms in the input tensor.
+        input_atom_num (int): atom number (i.e. :math:`n_{inp}`) in the input tensor.
+
+
     """
 
-    def __init__(self, align_atom_group):
-        """
+    def __init__(self, align_atom_group, input_atom_group):
+        r"""
+        Raises:
+            ValueError: if some reference atom is not in the atom group *input_atom_group*.
         """
 
         super(AlignmentLayer, self).__init__()
 
-        self.register_buffer('align_atom_indices', torch.tensor(align_atom_group.ids - 1)) # minus one, such that the index starts from 0
+        self.align_atom_indices = (align_atom_group.ids - 1).tolist() # minus one, such that the index starts from 0
+        self.input_atom_indices = (input_atom_group.ids - 1).tolist()
+        self.input_atom_num = len(input_atom_group)
 
-        ref_x = torch.from_numpy(align_atom_group.positions)        
+        self.ref_x = torch.from_numpy(align_atom_group.positions)        
         # shift reference state 
-        ref_c = torch.mean(ref_x, 0) 
-        ref_x = ref_x - ref_c
+        ref_c = torch.mean(self.ref_x, 0) 
+        self.ref_x = self.ref_x - ref_c
 
-        self.register_buffer('ref_x', ref_x)
+        try:
+            self._local_align_atom_indices = [self.input_atom_indices.index(idx) for idx in self.align_atom_indices]
+        except ValueError :
+            raise ValueError("Atoms used for alignment must be among the input")
 
     def show_info(self):
         """
-        display indices and positions of reference atoms that are used to perform alignment
+        display indices of input atoms, indices and positions of the reference atoms that are used to perform alignment
         """
-        print ('\natom indices used for alignment: \n', self.align_atom_indices.numpy())
+        print (f'\n{self.input_atom_num} atoms used for input, (0-based) global indices: \n', self.input_atom_indices)
+        print (f'\n{len(self._local_align_atom_indices)} atoms used for alignment, with (0-based) global indices: \n', self.align_atom_indices)
+        print ('local indices\n', self._local_align_atom_indices)
         print ('\npositions of reference state used in aligment:\n', self.ref_x.numpy())
 
     def forward(self, x):  
@@ -145,14 +161,19 @@ class AlignmentLayer(torch.nn.Module):
         Returns:
             :external+pytorch:class:`torch.Tensor` that stores the aligned states
 
-        **x** should be a 3d tensor, whose shape is :math:`[l, N, 3]`,
-        where :math:`l` is the number of states in **x** and :math:`N` is the total number of atoms in the system.
-        The returned tensor has the same shape.
+        Raises:
+            AssertionError: if `x` is not a Torch tensor with sizes :math:`[*, n_{inp},3]`.
+
+        **x** should be a 3d tensor, whose shape is :math:`[l, n_{inp}, 3]`, where :math:`l` is the number of states in **x** and :math:`n_{inp}` is the total number of atoms in the atom group *input_atom_group*. The returned tensor has the same shape.
 
         This method implements the Kabsch algorithm.
         """
+
+        assert isinstance(x, torch.Tensor), 'Input x is not a torch tensor'
+
+        assert x.size(1) == self.input_atom_num and x.size(2) == 3, f'Input should be a 3d torch tensor, with sizes [*, {self.input_atom_num}, 3]. Actual sizes: {x.shape}'
                          
-        traj_selected_atoms = x[:, self.align_atom_indices, :]
+        traj_selected_atoms = x[:, self._local_align_atom_indices, :]
         # centers
         x_c = torch.mean(traj_selected_atoms, 1, True)
         # translation
@@ -178,6 +199,7 @@ class FeatureMap(torch.nn.Module):
 
     Args:
         feature (:class:`molann.feature.Feature`): feature that defines the map
+        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies those atoms that are used as input. 
         use_angle_value (boolean): if true, use angle value in radians, else
             use sine and/or cosine values. It does not play a role if the
             type of **feature** is 'position'.
@@ -186,9 +208,9 @@ class FeatureMap(torch.nn.Module):
 
     .. math::
 
-       f: x \in \mathbb{R}^{n \times 3} \longrightarrow f(x) \in \mathbb{R}^{d}\,,
+       f: x \in \mathbb{R}^{n_{inp} \times 3} \longrightarrow f(x) \in \mathbb{R}^{d}\,,
 
-    corresponding to the input feature. 
+    corresponding to the input feature, where :math:`n_{inp}` is the number of atoms provided in the input.
 
     Example:
 
@@ -204,25 +226,37 @@ class FeatureMap(torch.nn.Module):
         ref = mda.Universe(pdb_filename) 
 
         f = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
-        fmap = FeatureMap(f, use_angle_value=False)
+        input_ag = ref.select_atoms('bynum 1 2 3 4 5')
+        fmap = FeatureMap(f, input_ag, use_angle_value=False)
         print ('dim=', fmap.dim())
 
-        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        x = torch.tensor(input_ag.positions).unsqueeze(0)
         print (fmap(x))
         feature_model_name = 'feature_map.pt'
         torch.jit.script(fmap).save(feature_model_name)
 
     """
 
-    def __init__(self, feature, use_angle_value=False):
+    def __init__(self, feature, input_atom_group, use_angle_value=False):
         """
+        Raises:
+            ValueError: if some atom used to define feature is not in the atom group for input.
         """
         super(FeatureMap, self).__init__()
+
         self.feature = feature
         self.type_id = feature.get_type_id()
         self.use_angle_value = use_angle_value
 
-        self.register_buffer('atom_indices', torch.tensor(feature.get_atom_indices()-1))
+        self.input_atom_indices = (input_atom_group.ids - 1).tolist()
+        self.input_atom_num = len(input_atom_group)
+
+        atom_indices = feature.get_atom_indices()-1
+
+        try:
+            self._local_atom_indices = [self.input_atom_indices.index(idx) for idx in atom_indices]
+        except ValueError :
+            raise ValueError("Atoms used in feature must be among the input")
 
     def dim(self):
         r"""
@@ -234,7 +268,7 @@ class FeatureMap(torch.nn.Module):
 
         The dimension equals 2 for 'dihedral', when **use_angle_value** =False.
 
-        The dimension equals :math:`3\times n` for 'position', where :math:`n`
+        The dimension equals :math:`3n` for 'position', where :math:`n`
         is the number of atoms involved in **feature** .
         """
         output_dim = 0
@@ -258,6 +292,9 @@ class FeatureMap(torch.nn.Module):
         Returns:
             :external+pytorch:class:`torch.Tensor`, 2d tensor that contains features of the states
 
+
+        **x** should be a 3d tensor, whose shape is :math:`[l, n_{inp}, 3]`, where :math:`l` is the number of states in **x** and :math:`n_{inp}` is the total number of atoms in the atom group *input_atom_group*. 
+
         The shape of the return tensor is :math:`[l, d]`, where :math:`l` is
         the number of states in **x** and :math:`d` is the dimension returned by :meth:`dim`.
 
@@ -269,9 +306,16 @@ class FeatureMap(torch.nn.Module):
 
         For 'position', it returns the coordinates of all the atoms in the feature.
 
+        Raises:
+            AssertionError: if `x` is not a Torch tensor with sizes :math:`[*, n_{inp},3]`.
+
         """
 
-        atom_indices = self.atom_indices
+        assert isinstance(x, torch.Tensor), 'Input x is not a torch tensor'
+
+        assert x.size(1) == self.input_atom_num and x.size(2) == 3, f'Input should be a 3d torch tensor, with sizes [*, {self.input_atom_num}, 3]. Actual sizes: {x.shape}'
+
+        atom_indices = self._local_atom_indices
 
         ret = torch.tensor(0.0)
 
@@ -311,18 +355,19 @@ class FeatureMap(torch.nn.Module):
         return ret 
 
 class FeatureLayer(torch.nn.Module):
-    r""" ANN layer that maps coordinates to all features
+    r""" ANN layer that maps coordinates to all features in a feature list
 
     Args:
         feature_list (list of :class:`molann.feature.Feature`): list of features 
+        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies those atoms that are used as input. 
         use_angle_value (boolean): whether to use angle value in radians 
 
-    This class encapsulates :class:`FeatureMap` and maps coordinates to multiple features.
+    This class encapsulates :class:`FeatureMap` and maps input coordinates to multiple features.
     More concretely, it defines the map
 
     .. math::
 
-       x \in \mathbb{R}^{n \times 3} \longrightarrow (f_1(x), f_2(x), \dots, f_l(x))\,,
+       x \in \mathbb{R}^{n_{inp} \times 3} \longrightarrow (f_1(x), f_2(x), \dots, f_l(x))\,,
 
     where :math:`l` is the number of features in the feature list, and each
     :math:`f_i` is the feature map defined by the class :class:`FeatureMap`.
@@ -347,11 +392,12 @@ class FeatureLayer(torch.nn.Module):
         f2 = Feature('name', 'angle', ref.select_atoms('bynum 1 3 2'))
         f3 = Feature('name', 'bond', ref.select_atoms('bynum 1 3'))
 
+        input_ag = ref.select_atoms('bynum 1 2 3 4 5 6')
         # define feature layer using features f1, f2 and f3
-        f_layer = FeatureLayer([f1, f3, f2], use_angle_value=False)
+        f_layer = FeatureLayer([f1, f3, f2], input_ag, use_angle_value=False)
 
         print ('output dim=', f_layer.output_dimension())
-        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        x = torch.tensor(input_ag.positions).unsqueeze(0)
         print (f_layer(x))
         ff = f_layer.get_feature(0)
         print (f_layer.get_feature_info())
@@ -359,15 +405,16 @@ class FeatureLayer(torch.nn.Module):
         feature_layer_model_name = 'feature_layer.pt'
         torch.jit.script(f_layer).save(feature_layer_model_name)
 
-    The following code defines an identity feature layer.
+    The following code defines an identity feature layer (for the first three atoms).
 
     .. code-block:: python
 
-        f4 = Feature('identity', 'position', ref.atoms)
-        identity_f_layer = FeatureLayer([f4], use_angle_value=False)
+        ag = ref.select_atoms('bynum 1 2 3')
+        f4 = Feature('identity', 'position', ag)
+        identity_f_layer = FeatureLayer([f4], ag, use_angle_value=False)
     """
 
-    def __init__(self, feature_list, use_angle_value=False):
+    def __init__(self, feature_list, input_atom_group, use_angle_value=False):
         """
         """
         super(FeatureLayer, self).__init__()
@@ -375,7 +422,9 @@ class FeatureLayer(torch.nn.Module):
         assert len(feature_list) > 0, 'Error: feature list is empty!'
 
         self.feature_list = feature_list
-        self.feature_map_list = torch.nn.ModuleList([FeatureMap(f, use_angle_value) for f in feature_list])
+        self.feature_map_list = torch.nn.ModuleList([FeatureMap(f, input_atom_group, use_angle_value) for f in feature_list])
+
+        self.input_atom_num = len(input_atom_group)
 
     def get_feature_info(self):
         r"""display information of features 
@@ -418,6 +467,11 @@ class FeatureLayer(torch.nn.Module):
         in the feature list and then concatenates the tensors.
             
         """
+
+        assert isinstance(x, torch.Tensor), 'Input x is not a torch tensor'
+
+        assert x.size(1) == self.input_atom_num and x.size(2) == 3, f'Input should be a 3d torch tensor, with sizes [*, {self.input_atom_num}, 3]. Actual sizes: {x.shape}'
+
         xf_vec = [fmap(x) for fmap in self.feature_map_list]
         # Features are stored in columns 
         xf = torch.cat(xf_vec, dim=1)
@@ -444,18 +498,19 @@ class PreprocessingANN(torch.nn.Module):
         ref = mda.Universe(pdb_filename) 
 
         ag=ref.select_atoms('bynum 1 2 3')
+        input_ag=ref.select_atoms('bynum 1 2 3 4 5 6 7')
 
         # define alignment layer
-        align = AlignmentLayer(ag)
+        align = AlignmentLayer(ag, input_ag)
 
         # features are just positions of atoms 1,2 and 3.
         f1 = Feature('name', 'position', ag)
-        f_layer = FeatureLayer([f1], use_angle_value=False)
+        f_layer = FeatureLayer([f1], input_ag, use_angle_value=False)
 
         # put together to get the preprocessing layer
         pp_layer = PreprocessingANN(align, f_layer)
 
-        x = torch.tensor(ref.atoms.positions).unsqueeze(0)
+        x = torch.tensor(input_ag.positions).unsqueeze(0)
         print (pp_layer(x))
 
     When feature is both translation- and rotation-invariant, alignment is not neccessary:
@@ -464,7 +519,7 @@ class PreprocessingANN(torch.nn.Module):
 
         # define feature as dihedral angle 
         f1 = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
-        f_layer = FeatureLayer([f1], use_angle_value=False)
+        f_layer = FeatureLayer([f1], input_ag, use_angle_value=False)
 
         # since feature is both translation- and rotation-invariant, alignment is not neccessary
         pp_layer = PreprocessingANN(None, f_layer)
@@ -473,8 +528,8 @@ class PreprocessingANN(torch.nn.Module):
 
     .. code-block:: python
 
-        f = Feature('identity', 'position', ref.atoms)
-        identity_f_layer = FeatureLayer([f], use_angle_value=False)
+        f = Feature('identity', 'position', input_ag)
+        identity_f_layer = FeatureLayer([f], input_ag, use_angle_value=False)
         pp_layer = PreprocessingANN(align, identity_f_layer)
 
     """
@@ -535,7 +590,9 @@ class MolANN(torch.nn.Module):
         ref = mda.Universe(pdb_filename) 
 
         f1 = Feature('name', 'dihedral', ref.select_atoms('bynum 1 3 2 4'))
-        f_layer = FeatureLayer([f1], use_angle_value=False)
+        input_ag=ref.select_atoms('bynum 1 2 3 4 5 6 7')
+
+        f_layer = FeatureLayer([f1], input_ag, use_angle_value=False)
         pp_layer = PreprocessingANN(None, f_layer)
 
         output_dim = pp_layer.output_dimension()
