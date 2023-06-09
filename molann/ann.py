@@ -432,10 +432,7 @@ class FeatureLayer(torch.nn.Module):
         Returns:
             :external+pandas:class:`pandas.DataFrame`, information of features
         """
-        df = pd.DataFrame()
-        for f in self.feature_list:
-            df = df.append(f.get_feature_info(), ignore_index=True)
-        return df
+        return pd.concat([f.get_feature_info() for f in self.feature_list], ignore_index=True)
 
     def get_feature(self, idx):
         r"""
