@@ -5,9 +5,9 @@
 :Year: 2022
 :Copyright: GNU Public License v3
 
-This module implements a class that defines a feature of molecular system
+This module implements a class that defines a feature of a molecular system
 (:class:`molann.feature.Feature`), and a class that constructs a list of
-features from a feature file (:class:`molann.feature.FeatureFileReader`).
+features from a feature file (read by :class:`molann.feature.FeatureFileReader`).
 
 Classes
 -------
@@ -26,7 +26,7 @@ class Feature(object):
     r"""Feature of system
 
     :param str name: feature's name
-    :param str feature_type: feature's type; supported values are 'angle', 'bond', 'dihedral', and 'position'
+    :param str feature_type: currently supported values: 'angle', 'bond', 'dihedral', and 'position'
     :param atom_group: atom group used to define a feature 
     :type atom_group: :external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`
 
@@ -49,20 +49,19 @@ class Feature(object):
         pdb_filename = '/path/to/system.pdb'
         ref = mda.Universe(pdb_filename) 
 
-        # feature that is the angle formed by the atoms whose ids are 1, 2 and 3.
+        # feature that is the angle formed by the atoms whose (1-based) indices are 1, 2 and 3.
         f1 = Feature('some name', 'angle', ref.select_atoms('bynum 1 2 3'))
         print (f1.get_feature_info())
-        # feature that is the bond distance between the two atoms whose ids are 1 and 2.
+        # feature that is the bond distance between the two atoms whose (1-based) indices are 1 and 2.
         f2 = Feature('some name', 'bond', ref.select_atoms('bynum 1 2'))
-        # dihedral angle formed by atoms whose ids are 1, 2, 3, and 4.
+        # dihedral angle formed by atoms whose (1-based) indices are 1, 2, 3, and 4.
         f3 = Feature('some name', 'dihedral', ref.select_atoms('bynum 1 2 3 4'))
-        # coordinates of atoms whose ids are 3 and 4.
+        # coordinates of atoms whose (1-based) indices are 3 and 5.
         f4 = Feature('some name', 'position', ref.select_atoms('bynum 3 5'))
 
     Note:
-        :external+mdanalysis:meth:`MDAnalysis.core.universe.Universe.select_atoms()` returns an atom group that does not preserve the orders of atoms.
-        To construct a feature that is the dihedral angle formed by atoms whose ids
-        are 2,1,3, and 4, we can define the atom group by concatenation:
+        :external+mdanalysis:meth:`MDAnalysis.core.universe.Universe.select_atoms()` returns an atom group that may not preserve the order of atoms.
+        To construct a feature that defines the dihedral angle formed by atoms whose indices are 2,1,3, and 4, we can define the atom group by concatenation:
         
         .. code-block:: python
 
@@ -70,12 +69,10 @@ class Feature(object):
             f = Feature('some name', 'dihedral', ag)
 
     Attributes:
-        name: string that indicates the name of feature
-        type_name : string whose value is among 'angle', 'bond', 'dihedral', or 'position'
-
-        type_id : integer, 0 if type_name='angle', 1 if type_name='bond', 2 if type_name='dihedral', 3 if type_name='position'
-
-        atom_group : :external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup` used to define the feature
+        name: string, name of the feature
+        type_name: string, whose value is either 'angle', 'bond', 'dihedral', or 'position'
+        type_id: integer, 0 if type_name='angle', 1 if type_name='bond', 2 if type_name='dihedral', 3 if type_name='position'
+        atom_group: :external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup` used to define the feature
 
     """
 
@@ -121,7 +118,7 @@ class Feature(object):
     def get_atom_indices(self):
         """
         Returns:
-            numpy array of int, indices of atoms in the atom group. The indices start from 1.
+            numpy array of int, (1-based) indices of atoms in the atom group. 
         """
         return self.atom_group.ix+1
 
@@ -152,8 +149,8 @@ class FeatureFileReader(object):
         A feature file is a normal text file. 
 
         Each section describes a list of features.
-        The begining of a section is marked by a line with content '[section_name]', and its end is marked by a line with
-        content '[End]'. :meth:`read` constructs a list of :class:`Feature` from the section with
+        A section begins with a line of content '[section_name]', and ends
+        with a line of content '[End]' (case sensitive). The function :meth:`read` constructs a list of :class:`Feature` from the section with
         the corresponding section_name.
 
         Lines that describe a feature contain several fields, seperated by
@@ -230,7 +227,7 @@ class FeatureFileReader(object):
 
         Returns:
 
-            list of :class:`Feature`, a list of features constructed from the feature file
+            list of :class:`Feature`, a list of features constructed from the corresponding section of the feature file
         """
 
         self.feature_list = []
@@ -270,7 +267,7 @@ class FeatureFileReader(object):
     def get_feature_list(self):
         """
         Returns:
-            list of :class:`Feature`, feature list constructed by calling :meth:`read` 
+            list of :class:`Feature`, feature list constructed by :meth:`read` 
         """
         return self.feature_list
 
@@ -289,6 +286,6 @@ class FeatureFileReader(object):
         df = pd.DataFrame()
         for f in self.feature_list:
             f_info = f.get_feature_info()
-            df = df.append(f_info, ignore_index=True)
+            df = pd.concat([df, f_info], ignore_index=True)
         return df
 

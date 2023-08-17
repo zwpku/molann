@@ -114,7 +114,7 @@ def test_MolANN():
     torch.jit.script(molann).save(model_name)
 
 
-pdb_filename = '../../openmm_traj_samplers/system/AlanineDipeptideOpenMM/vacuum.pdb'
+pdb_filename = 'alanine-dipeptide-vacuum.pdb'
 # load the reference configuration from the PDB file
 ref = mda.Universe(pdb_filename) 
 
