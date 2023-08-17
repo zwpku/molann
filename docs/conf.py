@@ -15,7 +15,11 @@ import sys
 
 sys.path.insert(0, os.path.abspath('..'))
 
+#from platform import python_version
+#print (python_version())
+
 #import msmb_theme
+#import alabaster
 import sphinx_rtd_theme
 import molann
 

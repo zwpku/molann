@@ -7,7 +7,7 @@ r"""Artificial Neural networks for Molecular System --- :mod:`molann.ann`
 
 This module implements several PyTorch artificial neural network (ANN)
 classes, i.e. derived classes of :external+pytorch:class:`torch.nn.Module`, 
-which take into acount alignment, as well as features of molecular system.
+which take into acount alignment, or which use features of molecular system as input.
 
 Classes
 -------
@@ -70,18 +70,17 @@ class AlignmentLayer(torch.nn.Module):
     r"""ANN layer that performs alignment based on `Kabsch algorithm <http://en.wikipedia.org/wiki/kabsch_algorithm>`__
 
     Args:
-        align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies coordinates of reference atoms that are used to perform alignment. 
-        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies those atoms that are used as input. 
+        align_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): specifies atom group whose coordinates are taken as reference when performing alignment. 
+        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): specifies atoms that are used as input of the neural network. 
 
 
-    Let :math:`x_{ref}\in \mathbb{R}^{n_r\times 3}` be the coordinates of the
-    reference atoms, where :math:`n_r` is the number of atoms in the atom group `align_atom_group`. Then, this class defines the map
+    Let :math:`x_{ref}\in \mathbb{R}^{n_r\times 3}` be the coordinates of the reference atoms, where :math:`n_r` is the number of atoms in the atom group `align_atom_group`. Then, this class defines the map
 
     .. math::
 
         x \in \mathbb{R}^{n_{inp} \times 3} \longrightarrow (x-c(x))A(x) \in \mathbb{R}^{n_{inp} \times 3}\,,
 
-    where, given coordinates :math:`x` of :math:`n_{inp}` atoms, :math:`A(x)\in \mathbb{R}^{3\times 3}` and :math:`c(x)\in \mathbb{R}^{n_{inp}\times 3}` are respectively the optimal rotation and translation determined (with respect to :math:`x_{ref}`) using the Kabsch algorithm.
+    where, given coordinates :math:`x` of :math:`n_{inp}` atoms, :math:`A(x)\in \mathbb{R}^{3\times 3}` and :math:`c(x)\in \mathbb{R}^{n_{inp}\times 3}` (:math:`n_{inp}` repetitions of a vector in :math:`\mathbb{R}^{3}`) are respectively the optimal rotation and translation determined (with respect to :math:`x_{ref}`) using the Kabsch algorithm.
 
     Note that :math:`x_{ref}` will be shifted to have zero mean before it is used to align states.
 
@@ -113,9 +112,10 @@ class AlignmentLayer(torch.nn.Module):
 
 
     Attributes:
-        align_atom_indices (list of int): indices of atoms used to align coordinates.
-        input_atom_indices (list of int): indices of atoms in the input tensor.
+        align_atom_indices (list of int): (0-based) indices of atoms used to align coordinates.
+        input_atom_indices (list of int): (0-based) indices of atoms in the input tensor.
         input_atom_num (int): atom number (i.e. :math:`n_{inp}`) in the input tensor.
+        ref_x (:external+pytorch:class:`torch.Tensor`):  reference coordinates :math:`x_{ref}`.
 
 
     """
@@ -128,8 +128,8 @@ class AlignmentLayer(torch.nn.Module):
 
         super(AlignmentLayer, self).__init__()
 
-        self.align_atom_indices = (align_atom_group.ids - 1).tolist() # minus one, such that the index starts from 0
-        self.input_atom_indices = (input_atom_group.ids - 1).tolist()
+        self.align_atom_indices = align_atom_group.ix.tolist() # the index starts from 0
+        self.input_atom_indices = input_atom_group.ix.tolist()
         self.input_atom_num = len(input_atom_group)
 
         self.ref_x = torch.from_numpy(align_atom_group.positions)        
@@ -149,7 +149,7 @@ class AlignmentLayer(torch.nn.Module):
         print (f'\n{self.input_atom_num} atoms used for input, (0-based) global indices: \n', self.input_atom_indices)
         print (f'\n{len(self._local_align_atom_indices)} atoms used for alignment, with (0-based) global indices: \n', self.align_atom_indices)
         print ('local indices\n', self._local_align_atom_indices)
-        print ('\npositions of reference state used in aligment:\n', self.ref_x.numpy())
+        print ('\ncoordinates of reference state used in aligment:\n', self.ref_x.numpy())
 
     def forward(self, x):  
         """
@@ -180,7 +180,7 @@ class AlignmentLayer(torch.nn.Module):
         x_notran = traj_selected_atoms - x_c 
         
         xtmp = x_notran.permute((0,2,1))
-        prod = torch.matmul(xtmp, self.ref_x) # dimension: traj_length x 3 x 3
+        prod = torch.matmul(xtmp, self.ref_x) # batched matrix multiplication, output dimension: traj_length x 3 x 3
         u, s, vh = torch.linalg.svd(prod)
 
         diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)
@@ -199,10 +199,10 @@ class FeatureMap(torch.nn.Module):
 
     Args:
         feature (:class:`molann.feature.Feature`): feature that defines the map
-        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies those atoms that are used as input. 
+        input_atom_group
+        (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): atom group used as input. This atom group must include all the atoms used to define feature.
         use_angle_value (boolean): if true, use angle value in radians, else
-            use sine and/or cosine values. It does not play a role if the
-            type of **feature** is 'position'.
+            use sine and/or cosine values. It has no effect if the type of **feature** is 'position'.
 
     This class defines the feature map
 
@@ -210,7 +210,7 @@ class FeatureMap(torch.nn.Module):
 
        f: x \in \mathbb{R}^{n_{inp} \times 3} \longrightarrow f(x) \in \mathbb{R}^{d}\,,
 
-    corresponding to the input feature, where :math:`n_{inp}` is the number of atoms provided in the input.
+    corresponding to the input feature, where :math:`n_{inp}` is the number of atoms in the input atom group.
 
     Example:
 
@@ -248,7 +248,7 @@ class FeatureMap(torch.nn.Module):
         self.type_id = feature.get_type_id()
         self.use_angle_value = use_angle_value
 
-        self.input_atom_indices = (input_atom_group.ids - 1).tolist()
+        self.input_atom_indices = input_atom_group.ix.tolist()
         self.input_atom_num = len(input_atom_group)
 
         atom_indices = feature.get_atom_indices()-1
@@ -261,15 +261,13 @@ class FeatureMap(torch.nn.Module):
     def dim(self):
         r"""
         Return: 
-            int, total dimension of features or, equivalently, the dimension of the output layer of the ANN.
+            d (int), total dimension of features or, equivalently, dimension of the output layer of the ANN.
 
-        The dimension equals 1 for 'angle' and 'bond', as well as for
-        'dihedral' when **use_angle_value** =True.
+        :math:`d=1` for 'angle' and 'bond', as well as for 'dihedral' when **use_angle_value** =True.
 
-        The dimension equals 2 for 'dihedral', when **use_angle_value** =False.
+        :math:`d=2` for 'dihedral', when **use_angle_value** =False.
 
-        The dimension equals :math:`3n` for 'position', where :math:`n`
-        is the number of atoms involved in **feature** .
+        :math:`d=3n` for 'position', where :math:`n` is the number of atoms involved in **feature** (note: it is possible that :math:`n<n_{inp}`).
         """
         output_dim = 0
         if self.type_id == 0 or self.type_id == 1 : # angle or bond
@@ -293,10 +291,9 @@ class FeatureMap(torch.nn.Module):
             :external+pytorch:class:`torch.Tensor`, 2d tensor that contains features of the states
 
 
-        **x** should be a 3d tensor, whose shape is :math:`[l, n_{inp}, 3]`, where :math:`l` is the number of states in **x** and :math:`n_{inp}` is the total number of atoms in the atom group *input_atom_group*. 
+        **x** should be a 3d tensor with shape :math:`[l, n_{inp}, 3]`, where :math:`l` is the number of states in **x** and :math:`n_{inp}` is the total number of atoms in the atom group *input_atom_group*. 
 
-        The shape of the return tensor is :math:`[l, d]`, where :math:`l` is
-        the number of states in **x** and :math:`d` is the dimension returned by :meth:`dim`.
+        The output is a tensor with shape :math:`[l, d]`, where :math:`l` is the number of states in **x** and :math:`d` is the dimension returned by :meth:`dim`.
 
         For 'angle', if use_angle_value=True, it returns angle values in
         :math:`[0, \pi]`; otherwise, it retuns the cosine values of the angles.  
@@ -341,7 +338,7 @@ class FeatureMap(torch.nn.Module):
             n1 = torch.cross(r12, r23)
             n2 = torch.cross(r23, r34)
             cos_phi = (n1*n2).sum(dim=1, keepdim=True)
-            sin_phi = (n1 * r34).sum(dim=1, keepdim=True) * torch.norm(r23, dim=1, keepdim=True)
+            sin_phi = (n1*r34).sum(dim=1, keepdim=True) * torch.norm(r23, dim=1, keepdim=True)
             radius = torch.sqrt(cos_phi**2 + sin_phi**2)
 
             if self.use_angle_value :
@@ -349,7 +346,7 @@ class FeatureMap(torch.nn.Module):
             else :
                 ret = torch.cat((cos_phi / radius, sin_phi / radius), dim=1)
 
-        if self.type_id == 3: # atom_position 
+        if self.type_id == 3: # atom position 
             ret = x[:, atom_indices, :].reshape((-1, len(atom_indices) * 3))
 
         return ret 
@@ -359,7 +356,7 @@ class FeatureLayer(torch.nn.Module):
 
     Args:
         feature_list (list of :class:`molann.feature.Feature`): list of features 
-        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): Specifies those atoms that are used as input. 
+        input_atom_group (:external+mdanalysis:class:`MDAnalysis.core.groups.AtomGroup`): atom group used as input. 
         use_angle_value (boolean): whether to use angle value in radians 
 
     This class encapsulates :class:`FeatureMap` and maps input coordinates to multiple features.
@@ -369,7 +366,7 @@ class FeatureLayer(torch.nn.Module):
 
        x \in \mathbb{R}^{n_{inp} \times 3} \longrightarrow (f_1(x), f_2(x), \dots, f_l(x))\,,
 
-    where :math:`l` is the number of features in the feature list, and each
+    where :math:`n_{inp}` is the number of atoms in the atom group *input_atom_group*, :math:`l` is the number of features in the feature list, and each
     :math:`f_i` is the feature map defined by the class :class:`FeatureMap`.
 
     Raises:
@@ -423,7 +420,6 @@ class FeatureLayer(torch.nn.Module):
 
         self.feature_list = feature_list
         self.feature_map_list = torch.nn.ModuleList([FeatureMap(f, input_atom_group, use_angle_value) for f in feature_list])
-
         self.input_atom_num = len(input_atom_group)
 
     def get_feature_info(self):
@@ -439,7 +435,7 @@ class FeatureLayer(torch.nn.Module):
         Args: 
             idx (int): index of feature in feature list
         Returns:
-             :class:`molann.feature.Feature`, the feature in the feature list
+             :class:`molann.feature.Feature`, the :math:`idx`th feature in the feature list
         """
         return self.feature_list[idx]
 
@@ -447,7 +443,7 @@ class FeatureLayer(torch.nn.Module):
         r"""
         Returns: 
             int, total dimension of features in the feature list, or, equivalently,
-            the dimension of the output layer of ANN
+            the size of the output layer of ANN
         """
         return sum([f_map.dim() for f_map in self.feature_map_list])
 
@@ -469,9 +465,8 @@ class FeatureLayer(torch.nn.Module):
 
         assert x.size(1) == self.input_atom_num and x.size(2) == 3, f'Input should be a 3d torch tensor, with sizes [*, {self.input_atom_num}, 3]. Actual sizes: {x.shape}'
 
-        xf_vec = [fmap(x) for fmap in self.feature_map_list]
         # Features are stored in columns 
-        xf = torch.cat(xf_vec, dim=1)
+        xf = torch.cat([fmap(x) for fmap in self.feature_map_list], dim=1)
         return xf
 
 class PreprocessingANN(torch.nn.Module):
@@ -510,7 +505,7 @@ class PreprocessingANN(torch.nn.Module):
         x = torch.tensor(input_ag.positions).unsqueeze(0)
         print (pp_layer(x))
 
-    When feature is both translation- and rotation-invariant, alignment is not neccessary:
+    When feature is already both translation- and rotation-invariant, alignment is not neccessary:
 
     .. code-block:: python
 

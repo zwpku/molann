@@ -6,7 +6,7 @@
 Welcome to MolANN's documentation
 ==================================
 
-This package implements PyTorch artificial neural network classes that allow to define neural network functions that take into account alignment, or functions that depend on molecular features (bonds, angles, etc.). 
+This package implements classes that define PyTorch Artificial Neural Network (ANN) functions taking into account alignment (translation and rotation), and functions that depend on molecular features (bonds, angles, etc.). 
 
 .. toctree::
    :maxdepth: 2

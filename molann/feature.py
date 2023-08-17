@@ -121,9 +121,9 @@ class Feature(object):
     def get_atom_indices(self):
         """
         Returns:
-            list of int, indices of atoms in the atom group. The indices start from 1.
+            numpy array of int, indices of atoms in the atom group. The indices start from 1.
         """
-        return self.atom_group.ids
+        return self.atom_group.ix+1
 
     def get_type_id(self):
         """
@@ -137,7 +137,7 @@ class Feature(object):
         Returns:
             :external+pandas:class:`pandas.DataFrame`, which contains feature's information
         """
-        return pd.DataFrame({'name': self.name, 'type': self.type_name, 'type_id': self.type_id, 'atom indices': [self.get_atom_indices()]})
+        return pd.DataFrame({'name': self.name, 'type': self.type_name, 'type_id': self.type_id, 'atom indices (1-based)': [self.get_atom_indices()]})
 
 class FeatureFileReader(object):
     r"""Read features from file

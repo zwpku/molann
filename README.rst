@@ -1,9 +1,7 @@
 MolANN
 ======
 
-Artificial Neural Networks (ANNs) for Molecular Systems
-
-This package implements PyTorch ANN classes that allow to define neural network functions that take into account alignment, or functions that depend on molecular features (bonds, angles, etc.). 
+This package implements classes that define PyTorch Artificial Neural Network (ANN) functions taking into account alignment (translation and rotation), and functions that depend on molecular features (bonds, angles, etc.). 
 
 Installation 
 ============
