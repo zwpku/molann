@@ -132,7 +132,10 @@ class AlignmentLayer(torch.nn.Module):
         self.input_atom_indices = input_atom_group.ix.tolist()
         self.input_atom_num = len(input_atom_group)
 
-        self.ref_x = torch.from_numpy(align_atom_group.positions)        
+        ref_x = torch.from_numpy(align_atom_group.positions)        
+
+        self.register_buffer('ref_x', ref_x)
+
         # shift reference state 
         ref_c = torch.mean(self.ref_x, 0) 
         self.ref_x = self.ref_x - ref_c
@@ -180,10 +183,11 @@ class AlignmentLayer(torch.nn.Module):
         x_notran = traj_selected_atoms - x_c 
         
         xtmp = x_notran.permute((0,2,1))
+        
         prod = torch.matmul(xtmp, self.ref_x) # batched matrix multiplication, output dimension: traj_length x 3 x 3
         u, s, vh = torch.linalg.svd(prod)
 
-        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)
+        diag_mat = torch.diag(torch.ones(3)).unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device, dtype=u.dtype)
 
         sign_vec = torch.sign(torch.linalg.det(torch.matmul(u, vh))).detach()
         diag_mat[:,2,2] = sign_vec
